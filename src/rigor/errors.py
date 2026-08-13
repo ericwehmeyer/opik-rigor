@@ -55,3 +55,28 @@ class JudgeOutputError(RigorError):
 
 class EvidenceError(RigorError):
     """Raised when the evidence log cannot be written or read."""
+
+
+class BaselineError(RigorError):
+    """Raised when a baseline file is missing, malformed, or fails its own hash.
+
+    A baseline whose contents no longer match its embedded digest is not a
+    baseline -- it is an unsigned claim about what the system used to do.
+    """
+
+
+class StatisticalAssertionError(AssertionError, RigorError):
+    """Base class for a failed statistical gate.
+
+    Inherits :class:`AssertionError` so pytest reports it as an ordinary test
+    failure, and carries the full statistical report on the instance so a caller
+    that wants the numbers does not have to parse the message.
+
+    The message is deliberately verbose. "assert 0.87 >= 0.9" tells a reader
+    nothing about whether they sampled enough times to know that; the failure
+    message of a statistical gate has to be the statistical report itself.
+    """
+
+    def __init__(self, message: str, **stats: object) -> None:
+        self.stats = dict(stats)
+        super().__init__(message)

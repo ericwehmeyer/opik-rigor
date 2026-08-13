@@ -9,7 +9,7 @@ a chat transcript.
 | Session | Scope | Status |
 |---|---|---|
 | 1 | Core, no network: scaffold, evidence, adapters, judge | **complete** — 218 passed, 1 skipped |
-| 2 | Statistics: sampling, distribution, Baseline | not started |
+| 2 | Statistics: sampling, distribution, Baseline | **complete** — 478 passed, 1 skipped |
 | 3 | Integrations: Opik, pytest plugin, example | not started |
 | 4 | Ship: README, rubric, tag v0.1.0 | not started |
 
@@ -25,6 +25,42 @@ a chat transcript.
 | `src/rigor/judge.py` | done | `tests/test_judge.py` — 46 |
 | `rubrics/example-rubric.md` | done | asserted to end with `OUTPUT_FORMAT_INSTRUCTION` |
 | `src/rigor/__init__.py` | done — re-exports the public surface | `tests/test_integration_session1.py` — 13 |
+
+## Session 2 — module status
+
+| Module | State | Tests |
+|---|---|---|
+| `src/rigor/sampling.py` | done | `tests/test_sampling.py` — 64 |
+| `src/rigor/distribution.py` | done | `tests/test_distribution.py` — 118 |
+| `src/rigor/baseline.py` | done | `tests/test_baseline.py` — 64 |
+| dogfooding suite | done | `tests/test_integration_session2.py` — 9 |
+
+**Implementation and tests were written by different authors, deliberately.** The
+agent that wrote `distribution.py` was told it would not write the tests, and the
+test author was given expected values derived independently — by root-finding the
+score-test inequality that *defines* the Wilson interval — before the
+implementation existed. `tests/test_distribution.py` embeds that bisection oracle,
+so the independent check ships with the library rather than living in a scratchpad.
+Mann-Whitney gets the same treatment: `U` is hand-counted from its definition,
+because checking scipy against scipy would prove nothing when scipy *is* the
+implementation.
+
+The structure paid for itself — three real bugs, each found by an author with no
+stake in the implementation:
+
+1. **`TimeoutError` shadowing in `sampling.py`.** Since Python 3.11
+   `concurrent.futures.TimeoutError` *is* `builtins.TimeoutError`, so catching it
+   in the collector rewrote a provider's own socket timeout as rigor's budget
+   expiring — the module violating its own thesis that a failure and an exception
+   are facts about different systems.
+2. **The per-run timeout was not per-run.** The collector waited on futures in
+   submission order, so a run queued behind others was granted several budgets'
+   worth of wall clock. Both fixed by running the same `_run_once` on both paths
+   and timing from inside the worker.
+3. **`wilson_lower_bound(0, n)` returned a positive number.** At p̂=0 `centre` and
+   `half` are the same expression analytically, but evaluated in different orders,
+   and `_clamp` squeezed only the negative side — so ~15% of `(n, confidence)`
+   pairs returned a lower confidence bound sitting *above* its own point estimate.
 
 ## Decisions made, and why
 
@@ -94,6 +130,15 @@ invariants no single module owns (notably a subprocess check that importing
 `fake.py` because it was the only provider-free module at the time; that left the
 real adapters importing from the test double, which is backwards. `base.py` is
 the seam module and has no provider dependency either.
+
+**The pass-rate gate uses a ONE-SIDED bound.** `wilson_lower_bound` takes
+`z = norm.ppf(confidence)`, not `norm.ppf(1 - (1-c)/2)`. A gate only ever asks "is
+the true rate at least X?" — there is no upper bar to defend, so the whole error
+budget goes to the floor. Using the two-sided z would silently make a gate labelled
+95% behave as 97.5%. The difference is not cosmetic: for 14/20 the one-sided bound
+is 0.5162 and the two-sided is 0.4810. Anyone comparing rigor's numbers against a
+textbook table needs to know which convention is in force, so it is stated in the
+docstring and pinned by a test that would fail under the other z.
 
 ## Known gaps entering Session 2
 
