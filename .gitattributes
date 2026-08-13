@@ -1,0 +1,9 @@
+# Normalise to LF in the repository. This matters more than usual here: the judge
+# hashes its rubric file, and a rubric checked out with CRLF on Windows would
+# otherwise hash differently than the same rubric on a Linux CI runner, which the
+# drift check would correctly -- but uselessly -- report as a changed rubric.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

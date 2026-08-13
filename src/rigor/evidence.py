@@ -18,9 +18,9 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
