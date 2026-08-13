@@ -157,16 +157,27 @@ rubric file. Without this, the same rubric checked out on Windows and on a Linux
 runner would hash differently, and the drift check would fire on every
 cross-platform run — correctly, but uselessly.
 
-**MIT license, `opik-rigor` distribution name, `rigor` import name — decided at
-the v0.1.0 tag, as the build plan required.** The distribution name says what it
-is for and what it integrates with; the import name stays short because it appears
-in every example and `import opik_rigor` reads badly next to `import opik`.
+**MIT license, `opik-rigor` distribution name, `opik_rigor` import name.** The
+distribution name was decided at the v0.1.0 tag as the build plan required, and
+is free on both PyPI and TestPyPI (checked 2026-08-13).
 
-⚠️ **Before any PyPI publish, check that both names are free.** `rigor` is a
-generic import name and may collide with something already installed in a user's
-environment; `opik-rigor` may or may not be available as a distribution. Neither
-was verified, because nothing has been published — but publishing without checking
-is how you end up shadowing somebody else's module.
+**The import name was originally `rigor`, and that was wrong.** The warning
+previously recorded here — check the names before publishing — was acted on after
+the tag, and the check found that `rigor` is already taken on PyPI by an unrelated
+HTTP-API-testing DSL whose wheel installs a top-level `rigor/`. Any environment
+holding both would have had one silently shadowing the other depending on path
+order. For a library whose entire argument is that nothing should change
+underneath you unannounced, that was not a name to keep, so the package was
+renamed to `opik_rigor` and v0.1.0 retagged.
+
+Deliberately still called `rigor`, because they live in namespaces that cannot
+collide with a distribution: the `rigor_repeat` marker, the `rigor_evidence` and
+`rigor_judge` fixtures, the `rigor_evidence_path` ini option, the pytest11
+entry-point name, and the Opik feedback-score prefix.
+
+The lesson generalises past this repo: the check was cheap, it was written down as
+a known gap rather than acted on, and it sat unactioned right through the tag. A
+gap you have recorded is not a gap you have closed.
 
 **Session 4 README quickstart was executed, not written.** Every code block was
 run in a clean virtualenv against the built wheel, and the output pasted verbatim.
@@ -206,7 +217,7 @@ and `tests/test_adapters.py` never builds a judge — which keeps them independe
 but proves nothing about the two fitting together.
 `tests/test_integration_session1.py` covers exactly that, plus the package-level
 invariants no single module owns (notably a subprocess check that importing
-`rigor` loads no provider SDK and no integration module).
+`opik_rigor` loads no provider SDK and no integration module).
 
 **Credential guards live in `adapters/base.py`, not `fake.py`.** They started in
 `fake.py` because it was the only provider-free module at the time; that left the
