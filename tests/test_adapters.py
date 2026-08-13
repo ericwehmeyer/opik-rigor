@@ -4,8 +4,8 @@ Three properties are load-bearing enough to test rather than assume:
 
 * a credential never becomes a constructor argument, a ``repr``, or an exception
   message -- the tests plant a sentinel key in the environment and hunt for it;
-* ``import rigor.adapters`` works with no provider SDK installed, which is tested
-  for real (neither SDK is installed here) rather than by mocking an import;
+* ``import rigor.adapters`` never imports a provider SDK, checked in a subprocess
+  so it holds whether or not one happens to be installed;
 * :class:`FakeAdapter` hands out exactly the scripted responses, in order, under
   concurrency, and reproducibly under a seed -- because every statistical gate in
   this library is measured against it.
@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -60,12 +62,25 @@ def openai_env(monkeypatch: pytest.MonkeyPatch) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def test_package_imports_with_no_provider_sdk_installed() -> None:
-    # Not a hypothetical: neither SDK is installed in this environment, which is
-    # the whole point -- collecting the suite must not require a provider.
-    assert importlib.util.find_spec("anthropic") is None
-    assert importlib.util.find_spec("openai") is None
+def test_importing_the_adapters_does_not_import_a_provider_sdk() -> None:
+    # The invariant is about *our* imports, not about what happens to be installed.
+    # It was originally written as `find_spec("openai") is None`, which passed only
+    # because no environment here had the SDK -- and then broke the moment a venv
+    # installed opik, which depends on openai. That version tested the environment;
+    # this one tests the code, and holds either way. A subprocess is the only honest
+    # check, since this session has already imported half the world.
+    code = (
+        "import sys, rigor.adapters; "
+        "print(','.join(sorted(m for m in sys.modules "
+        "if m.split('.')[0] in ('anthropic', 'openai'))))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == ""
 
+
+def test_the_adapter_package_exposes_its_documented_surface() -> None:
     import rigor.adapters as adapters
 
     assert set(adapters.__all__) == {
@@ -212,6 +227,13 @@ def test_key_never_appears_in_the_error_raised_by_a_failing_call(
 def test_missing_sdk_is_reported_with_the_install_command(
     factory, package: str, anthropic_env: str, openai_env: str
 ) -> None:
+    # This one genuinely needs the SDK to be absent -- it is asserting on the
+    # error raised when the lazy import fails, and there is no honest way to
+    # observe that path while the package is importable. Skipped rather than
+    # faked, because monkeypatching the import machinery would test the mock.
+    if importlib.util.find_spec(package) is not None:
+        pytest.skip(f"{package} is installed here, so the missing-SDK path cannot run")
+
     adapter = factory()
 
     with pytest.raises(AdapterError) as excinfo:

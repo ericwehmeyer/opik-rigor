@@ -10,7 +10,7 @@ a chat transcript.
 |---|---|---|
 | 1 | Core, no network: scaffold, evidence, adapters, judge | **complete** — 218 passed, 1 skipped |
 | 2 | Statistics: sampling, distribution, Baseline | **complete** — 478 passed, 1 skipped |
-| 3 | Integrations: Opik, pytest plugin, example | not started |
+| 3 | Integrations: Opik, pytest plugin, example | **complete** — 514 passed offline / 523 with opik |
 | 4 | Ship: README, rubric, tag v0.1.0 | not started |
 
 ## Session 1 — module status
@@ -61,6 +61,66 @@ stake in the implementation:
    `half` are the same expression analytically, but evaluated in different orders,
    and `_clamp` squeezed only the negative side — so ~15% of `(n, confidence)`
    pairs returned a lower confidence bound sitting *above* its own point estimate.
+
+## Session 3 — module status
+
+| Module | State | Tests |
+|---|---|---|
+| `COMPATIBILITY.md` | written **before** any integration code | — |
+| `src/rigor/integrations/opik.py` | done | `tests/test_integration_opik.py` — 11 |
+| `src/rigor/integrations/pytest_plugin.py` | done | `tests/test_pytest_plugin.py` — 15 |
+| `examples/summarise_eval.py` + README | done | `examples/test_example_runs.py` — 19 |
+
+Two environments are maintained: `.venv` (no Opik — the suite must be green
+without it) and `.venv-opik` (Opik 2.2.28 installed, for the integration and
+co-installation tests). Both must pass before a Session 3 change is done.
+
+**An invariant was stated wrongly and had to be re-framed.** Three tests asserted
+`importlib.util.find_spec("openai") is None` — which passed only because no
+environment had the SDK, and broke the moment a venv installed Opik, which depends
+on `openai`. They were testing the environment, not the library. The real invariant
+is that *rigor never imports a provider SDK*, which is now checked in a subprocess
+and holds whether or not one is installed. The one test that genuinely needs the
+SDK absent (the missing-SDK error message) skips when it is present, rather than
+monkeypatching the import machinery and testing the mock.
+
+## Caller friction, found by writing the example
+
+The agent that wrote `examples/` was asked to report where the library was awkward
+to *use*, and did. These are v0.1 roadmap items, not Session 3 bugs — recorded here
+so Session 4's roadmap section is written from evidence rather than imagination.
+
+1. **`FakeAdapter(seed=...)` is unusable for the fake worth building.** A judge
+   drawing uniformly from a global script is noise; a demo needs verdicts that
+   *correlate* with what the system under test did, which needs
+   `responses=<callable>` — and `seed=` is then rejected outright. The docstring
+   sells `seed` as the mechanism for reproducible stochasticity, but the only shape
+   of fake that can react to its input is the one shape that cannot take a seed.
+2. **`sample(fn, n)` hands `fn` nothing** — no index, no item. Every real eval
+   iterates a dataset, so every caller writes the same `itertools.cycle` closure.
+   `sample_of` reads like it might be the dataset helper and is not.
+3. **The report/exception split forces two code paths for one piece of
+   information.** Success returns a dict; failure carries the same numbers on
+   `exc.stats` — and `underpowered`/`runs_needed` exist *only* on failure. Printing
+   "what did the gate conclude" uniformly means `try/except` around every gate. A
+   non-raising `check_pass_rate(...) -> report` beside the asserting one is the
+   shape a dashboard or report actually wants.
+4. **Report dicts are `dict[str, Any]`** — no autocomplete, no typo protection, and
+   the key names are not guessable (`lower_bound` vs `interval_lower` vs
+   `min_rate`; `n_current` vs `n`). A frozen dataclass with `.to_dict()` would
+   serialise identically and read far better.
+5. **`SampleResult.scores()` is a method while `.outcomes`/`.values`/`.durations`
+   are properties** — and `Baseline.scores` is a plain tuple, so
+   `assert_no_regression(after.scores(), recorded.scores)` looks like a typo and
+   is not.
+6. **Reproducible output and the evidence log are in tension.** `EvidenceRecord`
+   has no rendering helper and always carries a real timestamp, so an example that
+   must print byte-identical output cannot show a record as it exists on disk.
+7. **`assert_score_distribution`'s first parameter is named `scores`** but accepts
+   a `SampleResult`.
+
+Counterweight, equally worth recording: the failure messages needed no framing at
+all. The two best screens in the example are copy-pasted library prose.
 
 ## Decisions made, and why
 

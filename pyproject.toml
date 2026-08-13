@@ -24,12 +24,22 @@ classifiers = [
 dependencies = ["scipy>=1.10"]
 
 [project.optional-dependencies]
-opik = ["opik>=1.0"]
+# Bounds justified in COMPATIBILITY.md: the surface was verified against 2.2.28,
+# and a major bump is exactly where trace()'s keyword names would move -- which
+# fails silently, because trace() ends in **ignored_kwargs.
+opik = ["opik>=2.0,<3"]
 pytest = ["pytest>=7.0"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.6"]
 
 [project.urls]
 Homepage = "https://github.com/ewehm/opik-rigor"
+
+# Registered as "rigor", never "opik": Opik ships its own pytest11 plugin under
+# that name (opik.plugins.pytest.hooks). See COMPATIBILITY.md. The module imports
+# nothing third-party at module scope, so loading it is cheap for suites that
+# never use the marker.
+[project.entry-points.pytest11]
+rigor = "rigor.integrations.pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rigor"]

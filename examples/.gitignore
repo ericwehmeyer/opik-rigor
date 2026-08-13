@@ -1,0 +1,4 @@
+# Written by summarise_eval.py on every run: the evidence log and the baseline
+# it records. Deliberately not committed -- they are outputs, and the example
+# clears and rewrites the directory each time it runs.
+.rigor-run/

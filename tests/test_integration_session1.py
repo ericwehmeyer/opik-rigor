@@ -10,7 +10,6 @@ and the package-level invariants that no single module owns.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
 import sys
@@ -223,12 +222,19 @@ def test_a_seeded_adapter_makes_a_judge_run_reproducible(tmp_path: Path) -> None
 # --------------------------------------------------------------------------- #
 
 
-def test_importing_rigor_needs_no_provider_sdk() -> None:
-    # Invariant 3 in PROGRESS.md. These SDKs are deliberately not installed, so
-    # this assertion is real rather than mocked.
-    assert importlib.util.find_spec("anthropic") is None
-    assert importlib.util.find_spec("openai") is None
-    assert rigor.AnthropicAdapter is not None
+def test_constructing_a_real_adapter_needs_no_provider_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Invariant 3 in PROGRESS.md, stated as a property of rigor rather than of the
+    # environment: an adapter can be *constructed* without its SDK, because the
+    # import is deferred to complete(). The earlier version asserted the SDKs were
+    # not installed, which broke as soon as a venv installed opik (which depends on
+    # openai) -- it was measuring the venv, not the library.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+
+    adapter = rigor.AnthropicAdapter("claude-sonnet-4-5-20250929")
+
+    assert adapter.model_id == "claude-sonnet-4-5-20250929"
 
 
 def test_importing_rigor_in_a_clean_interpreter_pulls_in_no_integrations() -> None:
