@@ -1,5 +1,9 @@
 # opik-rigor
 
+[![CI](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml/badge.svg)](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Statistical assertions and pinned-judge evaluation primitives for LLM test suites.
 
 ```python
