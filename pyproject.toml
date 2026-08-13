@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opik-rigor"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Statistical assertions and pinned-judge evaluation primitives for LLM test suites."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -11,7 +11,7 @@ a chat transcript.
 | 1 | Core, no network: scaffold, evidence, adapters, judge | **complete** — 218 passed, 1 skipped |
 | 2 | Statistics: sampling, distribution, Baseline | **complete** — 478 passed, 1 skipped |
 | 3 | Integrations: Opik, pytest plugin, example | **complete** — 514 passed offline / 523 with opik |
-| 4 | Ship: README, rubric, tag v0.1.0 | not started |
+| 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
 
 ## Session 1 — module status
 
@@ -147,10 +147,22 @@ rubric file. Without this, the same rubric checked out on Windows and on a Linux
 runner would hash differently, and the drift check would fire on every
 cross-platform run — correctly, but uselessly.
 
-**MIT license, `opik-rigor` distribution name, `rigor` import name.** The
-distribution name is deliberately still open; per the build plan it is decided
-before the v0.1.0 tag, not before Session 1. Changing it later touches one line of
-`pyproject.toml`.
+**MIT license, `opik-rigor` distribution name, `rigor` import name — decided at
+the v0.1.0 tag, as the build plan required.** The distribution name says what it
+is for and what it integrates with; the import name stays short because it appears
+in every example and `import opik_rigor` reads badly next to `import opik`.
+
+⚠️ **Before any PyPI publish, check that both names are free.** `rigor` is a
+generic import name and may collide with something already installed in a user's
+environment; `opik-rigor` may or may not be available as a distribution. Neither
+was verified, because nothing has been published — but publishing without checking
+is how you end up shadowing somebody else's module.
+
+**Session 4 README quickstart was executed, not written.** Every code block was
+run in a clean virtualenv against the built wheel, and the output pasted verbatim.
+The headline example deliberately *fails* — 18/20 with `min_rate=0.9` — because
+that failure message is the single clearest statement of what the library is for,
+and a quickstart that only shows success would be selling the wrong thing.
 
 ## Environment
 

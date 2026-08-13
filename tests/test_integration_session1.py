@@ -10,6 +10,7 @@ and the package-level invariants that no single module owns.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import subprocess
 import sys
@@ -256,4 +257,4 @@ def test_importing_rigor_in_a_clean_interpreter_pulls_in_no_integrations() -> No
 def test_every_public_name_is_importable_from_the_package_root() -> None:
     missing = [name for name in rigor.__all__ if not hasattr(rigor, name)]
     assert missing == []
-    assert rigor.__version__ == "0.1.0.dev0"
+    assert rigor.__version__ == importlib.metadata.version("opik-rigor")

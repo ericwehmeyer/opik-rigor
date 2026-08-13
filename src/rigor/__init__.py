@@ -52,7 +52,7 @@ from .judge import PinnedJudge, Verdict
 from .pinning import is_pinned, require_pinned
 from .sampling import Run, SampleResult, SampleTimeout, sample, sample_of
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = [
     "Adapter",
