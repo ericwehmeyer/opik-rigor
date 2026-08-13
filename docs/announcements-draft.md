@@ -8,10 +8,10 @@ Drafts only. Nothing here has been posted anywhere. Edit freely before use.
 
 **Title:** Statistical gates and judge pinning on top of Opik
 
-Two problems Opik does not set out to solve. A test asserting
-`pass_rate >= 0.9` over 20 runs measures a stochastic system once; and
-`claude-3-5-sonnet-latest` re-points, so scores from before it are not
-comparable to scores after.
+I have been using Opik for tracing and evaluation, and built a small library for
+two problems adjacent to it. A test asserting `pass_rate >= 0.9` over 20 runs
+measures a stochastic system once; and `claude-3-5-sonnet-latest` re-points, so
+scores from before it are not comparable to scores after.
 
 opik-rigor's gates compare a one-sided Wilson lower bound against your bar, not
 the observed rate: 18/20 gives 0.7383, 900/1000 gives 0.8833, so a 90% observed
