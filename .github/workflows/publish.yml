@@ -61,7 +61,12 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@v1.14.2
+      # Pinned to a commit SHA, not the v1.14.2 tag. A git tag is mutable and can
+      # be repointed by whoever controls the repository; this job holds
+      # id-token: write, so what runs here can mint a token that publishes under
+      # our name. The version is in the trailing comment for readability -- update
+      # both together.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
 
@@ -97,4 +102,9 @@ jobs:
             exit 1
           fi
 
-      - uses: pypa/gh-action-pypi-publish@v1.14.2
+      # Pinned to a commit SHA, not the v1.14.2 tag. A git tag is mutable and can
+      # be repointed by whoever controls the repository; this job holds
+      # id-token: write, so what runs here can mint a token that publishes under
+      # our name. The version is in the trailing comment for readability -- update
+      # both together.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

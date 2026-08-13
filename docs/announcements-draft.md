@@ -64,8 +64,6 @@ with no credentials. Not on PyPI yet — source below.
 
 https://github.com/ericwehmeyer/opik-rigor
 
-#LLMEvaluation
-
 ---
 
 ## 3. README badge row
