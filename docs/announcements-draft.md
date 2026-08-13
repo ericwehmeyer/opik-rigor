@@ -22,13 +22,11 @@ A complement, not an alternative: Opik owns datasets, dashboards, tracing; this
 owns the gate and the pin. The integration is two functions; the core never
 imports Opik.
 
-Verified against opik 2.2.28 on 2026-08-13. Two field notes. Opik's `pytest11`
+Verified against opik 2.2.28 on 2026-08-13. One field note: Opik's `pytest11`
 entry point is named `opik`, so ours registers as `rigor`; both collect together,
-and Opik's stays inert unless `llm_unit` tests are collected. Also, the rendered
-SDK reference shows `client.trace()` parameters with leading underscores
-(`_name`, `_input`); the installed code takes plain names. The signature ends in
-`**ignored_kwargs`, so code written from the page silently yields an unnamed
-trace.
+and Opik's stays inert unless `llm_unit` tests are collected. `record_traces_locally`
+made the integration testable without a server, which is why its tests drive the
+real client rather than a mock.
 
 pip install opik-rigor. MIT, Python 3.10+.
 

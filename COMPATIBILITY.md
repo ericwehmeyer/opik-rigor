@@ -169,17 +169,35 @@ accidental.
 This is an upstream bug in opik 2.2.28. Reported here so that a future reader who
 hits it knows it is not rigor's doing.
 
-## Corrections to the published docs
+## A correction to this file, not to the docs
 
-The rendered SDK reference at `comet.com/docs/opik/python-sdk-reference/Opik.html`
-shows every parameter with a leading underscore (`_name`, `_input`,
-`_project_name`). **That is a documentation rendering artifact.** The installed
-code takes ordinary names: `name`, `input`, `project_name`. Code written against
-the rendered page would fail — the real signature ends in `**ignored_kwargs`, so
-`client.trace(_name="x")` is silently swallowed rather than raising, and you would
-get an unnamed trace with no error.
+**An earlier version of this section claimed Opik's published SDK reference
+renders every parameter with a leading underscore (`_name`, `_input`), and warned
+that code copied from it would silently produce an unnamed trace. That claim was
+wrong, and Opik's documentation is fine.**
 
-The page `comet.com/docs/opik/testing/pytest_integration` 404s; the live one is
+What happened: the page was read through a tool that converts HTML to markdown.
+The reference italicises each parameter, and italics in markdown are `_like this_`
+— so every name came back wearing one extra leading underscore. The tell was
+sitting in the same output the whole time. Two genuinely private parameters,
+`_use_batching` and `_show_misconfiguration_message`, came back as
+`__use_batching` and `__show_misconfiguration_message`. *Every* name had gained
+exactly one underscore, which is a converter artifact, not a documentation
+convention.
+
+It is left in the file rather than quietly deleted because the mistake is
+instructive. Session 3's rule was "verify the vendor API by installing and
+introspecting it, not by reading the docs" — and that rule worked: the introspected
+signature was correct and the integration was built against it. The error was in
+the *other* direction, asserting a fault in someone else's work on the strength of
+a single tool's rendering. Introspection told us what the API is; it never told us
+what the documentation says, and the second claim needed its own evidence.
+
+Verified against the live page on 2026-08-13 after the fact: the parameters are
+ordinary names, exactly as the installed code has them.
+
+The one real documentation note that survives: the page
+`comet.com/docs/opik/testing/pytest_integration` 404s; the live one is
 `comet.com/docs/opik/v1/testing/pytest_integration`.
 
 ## Version policy
@@ -190,7 +208,9 @@ The page `comet.com/docs/opik/testing/pytest_integration` 404s; the live one is
   by this project and the extra should not claim otherwise.
 - **Upper bound <3** because a major bump is exactly where `trace()` keyword names
   would change, and the failure mode of guessing wrong is a silently unnamed trace
-  rather than an exception.
+  rather than an exception. This one does not depend on the retracted claim above:
+  the real signature ends in `**ignored_kwargs`, confirmed by introspecting the
+  installed package, so an unrecognised keyword is swallowed rather than raising.
 
 ## What to do when this drifts
 

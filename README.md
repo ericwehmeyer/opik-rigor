@@ -182,8 +182,9 @@ pip install "opik-rigor[pytest]"   # @pytest.mark.rigor_repeat, rigor_judge fixt
 **Opik** — two functions, not a framework: `log_sample_to_opik` maps a sample to a
 trace with one span per run (a run that *raised* is visibly distinct from one that
 *failed*), and `log_assertion_to_opik` maps a gate's verdict to feedback scores.
-The verified API surface, the version bounds, and four things the published docs
-get wrong are recorded in [COMPATIBILITY.md](COMPATIBILITY.md).
+The verified API surface, the version bounds, the reasoning behind them, and a
+correction to a claim this project got wrong about Opik's own documentation are
+all in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 **pytest** — `@pytest.mark.rigor_repeat(n=50, min_rate=0.9)` runs a test *n* times
 and applies the gate to the outcomes. A body that returns passes; one that raises
