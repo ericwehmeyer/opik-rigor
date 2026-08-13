@@ -108,7 +108,7 @@ the output is pasted verbatim. Nothing here is illustrative.
 Not on PyPI yet — install from source:
 
 ```bash
-git clone https://github.com/ewehm/opik-rigor
+git clone https://github.com/ericwehmeyer/opik-rigor
 cd opik-rigor && pip install .
 ```
 

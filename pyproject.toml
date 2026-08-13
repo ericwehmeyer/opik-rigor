@@ -32,7 +32,9 @@ pytest = ["pytest>=7.0"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.6"]
 
 [project.urls]
-Homepage = "https://github.com/ewehm/opik-rigor"
+Homepage = "https://github.com/ericwehmeyer/opik-rigor"
+Repository = "https://github.com/ericwehmeyer/opik-rigor"
+Issues = "https://github.com/ericwehmeyer/opik-rigor/issues"
 
 # Registered as "rigor", never "opik": Opik ships its own pytest11 plugin under
 # that name (opik.plugins.pytest.hooks). See COMPATIBILITY.md. The module imports
