@@ -96,9 +96,15 @@ opik.llm_unit(
 )
 ```
 
-rigor's marker is `@rigor.repeat(...)`. Different name, different mechanism
-(a pytest marker rather than a function decorator), so the two compose rather
-than collide.
+rigor's marker is `@pytest.mark.rigor_repeat(n=..., min_rate=...)`. Different
+name, different mechanism (a pytest marker rather than a function decorator), so
+the two compose rather than collide.
+
+(This line said `@rigor.repeat(...)` until it was corrected — the spelling guessed
+in the build plan, written into this file *before* the plugin existed, and never
+reconciled against `MARKER_NAME` once it did. Writing the compatibility document
+first is still the right order; it just means the parts describing your own
+unwritten code are predictions, and predictions need checking back.)
 
 ### 2. `opik.record_traces_locally()` makes offline testing real
 

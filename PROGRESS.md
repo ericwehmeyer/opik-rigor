@@ -246,5 +246,6 @@ docstring and pinned by a test that would fail under the other z.
   disagree). Fine for v0.1; a configurable range is a roadmap item, not a v0.1 gap.
 - Coverage is measured but no threshold is enforced in CI. Decide a floor in
   Session 2, once the statistics modules exist and the number means something.
-- CI has never actually run — the workflow is written but there is no remote yet.
-  Push before trusting it.
+- ~~CI has never actually run — the workflow is written but there is no remote yet.~~
+  Resolved: pushed to `github.com/ericwehmeyer/opik-rigor`, and the matrix went
+  green on the first run across py3.10–3.13 on Ubuntu and Windows.
