@@ -96,7 +96,7 @@ Also fixed after the v0.1.0 tag:
 
 ### Known limitations
 
-- Not published to PyPI or any other package index. Install from source.
+- Published to PyPI on 2026-08-13 as `opik-rigor` (import `opik_rigor`).
 - The judge's score range is fixed at 1 to 5. `SCORE_MIN` and `SCORE_MAX` are
   interpolated into the prompt so that rubric, prompt, and validator cannot
   disagree; a configurable range is a roadmap item.

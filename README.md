@@ -1,5 +1,6 @@
 # opik-rigor
 
+[![PyPI](https://img.shields.io/pypi/v/opik-rigor)](https://pypi.org/project/opik-rigor/)
 [![CI](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml/badge.svg)](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -109,11 +110,8 @@ enforces it — an audit trail you can quietly edit is not an audit trail.
 Everything below was executed in a clean virtualenv against the built wheel, and
 the output is pasted verbatim. Nothing here is illustrative.
 
-Not on PyPI yet — install from source:
-
 ```bash
-git clone https://github.com/ericwehmeyer/opik-rigor
-cd opik-rigor && pip install .
+pip install opik-rigor
 ```
 
 Save a rubric as `rubric.md` (the one in [`rubrics/example-rubric.md`](rubrics/example-rubric.md)
@@ -177,8 +175,8 @@ python examples/summarise_eval.py --seed 7 --n 40
 ## Optional extras
 
 ```bash
-pip install ".[opik]"     # log samples and verdicts to Opik
-pip install ".[pytest]"   # @pytest.mark.rigor_repeat, rigor_judge fixture
+pip install "opik-rigor[opik]"     # log samples and verdicts to Opik
+pip install "opik-rigor[pytest]"   # @pytest.mark.rigor_repeat, rigor_judge fixture
 ```
 
 **Opik** — two functions, not a framework: `log_sample_to_opik` maps a sample to a

@@ -22,6 +22,7 @@ it is a reconstruction.
 | 2 | Statistics: sampling, distribution, Baseline | **complete** — 478 passed, 1 skipped |
 | 3 | Integrations: Opik, pytest plugin, example | **complete** — 514 passed offline / 523 with opik |
 | 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
+| — | Publish | **v0.1.0 published to PyPI 2026-08-13** — `pip install opik-rigor` |
 
 ## Session 1 — module status
 

@@ -30,7 +30,7 @@ SDK reference shows `client.trace()` parameters with leading underscores
 `**ignored_kwargs`, so code written from the page silently yields an unnamed
 trace.
 
-Not on PyPI; install from source. MIT, Python 3.10+.
+pip install opik-rigor. MIT, Python 3.10+.
 
 https://github.com/ericwehmeyer/opik-rigor
 
@@ -60,7 +60,7 @@ sample, not a property, so a green test has told you about 20 coin flips rather
 than about the system.
 
 The library gates and pins; it is not an eval platform. 514 tests pass offline
-with no credentials. Not on PyPI yet — source below.
+with no credentials. On PyPI: pip install opik-rigor
 
 https://github.com/ericwehmeyer/opik-rigor
 
@@ -68,17 +68,12 @@ https://github.com/ericwehmeyer/opik-rigor
 
 ## 3. README badge row
 
-Existing CI / Python / license badges reproduced as they stand, plus a
-commented-out PyPI badge.
+Already applied to `README.md`. The PyPI badge went live with the 0.1.0 release
+on 2026-08-13 and is no longer commented out.
 
 ```markdown
+[![PyPI](https://img.shields.io/pypi/v/opik-rigor)](https://pypi.org/project/opik-rigor/)
 [![CI](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml/badge.svg)](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-<!-- Uncomment ONLY once opik-rigor is actually published to PyPI. Until then the
-     badge renders as "invalid" and implies an install path that does not exist.
-     Name availability was checked on 2026-08-13: opik-rigor is free on both
-     PyPI and TestPyPI.
-[![PyPI](https://img.shields.io/pypi/v/opik-rigor)](https://pypi.org/project/opik-rigor/)
--->
 ```
