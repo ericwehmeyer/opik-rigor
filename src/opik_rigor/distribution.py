@@ -17,7 +17,7 @@ Every gate here therefore reports three things a bare comparison cannot:
 
 The failure message *is* the statistical report, and the same numbers are
 attached to the exception as a dict so a caller does not have to parse prose.
-Anything given an :class:`~rigor.evidence.EvidenceLog` writes exactly one
+Anything given an :class:`~opik_rigor.evidence.EvidenceLog` writes exactly one
 ``assertion.evaluated`` record whether it passed or failed -- a gate that only
 records its passes is a highlight reel, not an audit trail.
 """
@@ -432,7 +432,7 @@ def assert_pass_rate(
     The gate is ``wilson_lower_bound(successes, n, confidence) >= min_rate``.
 
     Args:
-        result: A :class:`~rigor.sampling.SampleResult`, a ``(successes, n)``
+        result: A :class:`~opik_rigor.sampling.SampleResult`, a ``(successes, n)``
             tuple, or a sequence of per-run bools. A two-element tuple of plain
             ints is read as counts; every other sequence is read as outcomes.
         min_rate: The bar, in ``[0.0, 1.0]``.
@@ -560,7 +560,7 @@ def assert_score_distribution(
       severely at the small n where an eval suite operates.
 
     Args:
-        scores: A :class:`~rigor.sampling.SampleResult` (its :meth:`scores` are
+        scores: A :class:`~opik_rigor.sampling.SampleResult` (its :meth:`scores` are
             used) or a sequence of numbers.
         min_mean: Lower bound on the mean, or None to skip.
         min_p10: Lower bound on the 10th percentile, or None to skip.
@@ -695,7 +695,7 @@ def assert_no_regression(
 
     Args:
         current: Scores from the run under test -- a
-            :class:`~rigor.sampling.SampleResult` or a sequence of numbers.
+            :class:`~opik_rigor.sampling.SampleResult` or a sequence of numbers.
         baseline: Scores from the recorded baseline, same forms accepted.
         alpha: Significance level. Strictly between 0 and 1. Default 0.05.
         evidence: If given, one record is appended on pass and on fail.

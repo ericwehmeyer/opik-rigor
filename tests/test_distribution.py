@@ -34,7 +34,7 @@ from typing import Any
 import pytest
 from scipy.stats import norm
 
-from rigor.distribution import (
+from opik_rigor.distribution import (
     PassRateError,
     RegressionError,
     ScoreDistributionError,
@@ -44,10 +44,10 @@ from rigor.distribution import (
     wilson_interval,
     wilson_lower_bound,
 )
-from rigor.errors import StatisticalAssertionError
-from rigor.evidence import EVENT_ASSERTION, EvidenceLog
-from rigor.judge import Verdict
-from rigor.sampling import Run, SampleResult
+from opik_rigor.errors import StatisticalAssertionError
+from opik_rigor.evidence import EVENT_ASSERTION, EvidenceLog
+from opik_rigor.judge import Verdict
+from opik_rigor.sampling import Run, SampleResult
 
 # --------------------------------------------------------------------------- #
 # seeds -- stated once, never bare random.*

@@ -19,14 +19,14 @@ from typing import Any
 
 import pytest
 
-from rigor.baseline import (
+from opik_rigor.baseline import (
     BASELINE_SCHEMA_VERSION,
     DIGEST_PATTERN,
     PAYLOAD_FIELDS,
     Baseline,
 )
-from rigor.errors import BaselineError
-from rigor.sampling import Run, SampleResult
+from opik_rigor.errors import BaselineError
+from opik_rigor.sampling import Run, SampleResult
 
 SEED = 20260812
 
@@ -330,7 +330,7 @@ def test_future_schema_version_raises_before_anything_else_is_believed(tmp_path:
         Baseline.load(path)
 
     message = str(excinfo.value)
-    assert "newer than this version of rigor" in message
+    assert "newer than this version of opik_rigor" in message
     assert str(path) in message
     # Reported as the wrong schema, not as a forgery: the version decides how the
     # rest of the document reads, so it is checked before the digest.
@@ -359,7 +359,7 @@ def test_missing_schema_version_raises(tmp_path: Path) -> None:
 
 def test_every_failure_mode_has_its_own_message(tmp_path: Path) -> None:
     # A caller staring at a red CI run has to be able to tell "someone edited the
-    # baseline" from "the file is from a newer rigor" without reading this module.
+    # baseline" from "the file is from a newer opik_rigor" without reading this module.
     good = make_baseline()
 
     def message_from(path: Path) -> str:

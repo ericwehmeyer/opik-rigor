@@ -41,10 +41,10 @@ Issues = "https://github.com/ericwehmeyer/opik-rigor/issues"
 # nothing third-party at module scope, so loading it is cheap for suites that
 # never use the marker.
 [project.entry-points.pytest11]
-rigor = "rigor.integrations.pytest_plugin"
+rigor = "opik_rigor.integrations.pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rigor"]
+packages = ["src/opik_rigor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -62,5 +62,5 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.coverage.run]
-source = ["rigor"]
+source = ["opik_rigor"]
 branch = true

@@ -1,10 +1,10 @@
-"""Publish a rigor sample -- and the gates run over it -- to Opik.
+"""Publish a opik_rigor sample -- and the gates run over it -- to Opik.
 
 Two functions, no framework. :func:`log_sample_to_opik` maps one
-:class:`~rigor.sampling.SampleResult` to one Opik trace with one span per run;
+:class:`~opik_rigor.sampling.SampleResult` to one Opik trace with one span per run;
 :func:`log_assertion_to_opik` maps a gate's report dict to feedback scores on a
-trace that already exists. Everything else -- datasets, experiments, a "rigor
-project" -- is left to the caller, because rigor does not own your Opik workspace
+trace that already exists. Everything else -- datasets, experiments, a "opik_rigor
+project" -- is left to the caller, because opik_rigor does not own your Opik workspace
 and creating things in it behind your back is not a feature. The reasoning, and
 the exact Opik surface these two functions depend on, is written down in
 ``COMPATIBILITY.md``; if an Opik release moves something, that file is the
@@ -13,17 +13,17 @@ shortest path back.
 Three properties this module is built to preserve, each of which breaks something
 real if it is dropped:
 
-* **Nothing imports Opik at module scope.** ``import rigor.integrations.opik``
+* **Nothing imports Opik at module scope.** ``import opik_rigor.integrations.opik``
   must succeed with the extra uninstalled, so that a caller can import it, catch
   :class:`OpikIntegrationError`, and carry on. An import at module scope would
   turn a missing optional dependency into a collection error for the whole test
   session.
 * **A run that raised stays distinguishable from a run that failed.** That
-  distinction is the entire thesis of :mod:`rigor.sampling` -- a provider outage
+  distinction is the entire thesis of :mod:`opik_rigor.sampling` -- a provider outage
   is not a quality regression -- and a mapping that flattened both into "span
   with a falsey output" would destroy it at exactly the moment it is most needed
   (the dashboard someone looks at during an incident). Here a raised run gets a
-  ``rigor:raised`` tag, an ``outcome`` of ``"raised"``, and Opik's own
+  ``opik_rigor:raised`` tag, an ``outcome`` of ``"raised"``, and Opik's own
   ``error_info``, so it is filterable, readable, and rendered as an error.
 * **Everything sent is JSON-safe.** These payloads cross a network boundary. A
   ``numpy.float64`` from a statistical report, or a live exception object, would
@@ -65,14 +65,14 @@ __all__ = [
 SCORE_PREFIX = "rigor."
 
 #: Tag applied to every trace and span written here, so a workspace shared with
-#: other tooling can be filtered down to rigor's own records in one click.
-TRACE_TAG = "rigor"
+#: other tooling can be filtered down to opik_rigor's own records in one click.
+TRACE_TAG = "opik_rigor"
 
-#: Reserved key under which rigor's own metadata is nested, on both traces and
+#: Reserved key under which opik_rigor's own metadata is nested, on both traces and
 #: spans. Caller-supplied ``metadata`` is merged at the top level *around* it, so
 #: the two cannot overwrite each other -- except by the caller deliberately using
-#: this key, in which case rigor's block wins and the caller's is dropped.
-METADATA_KEY = "rigor"
+#: this key, in which case opik_rigor's block wins and the caller's is dropped.
+METADATA_KEY = "opik_rigor"
 
 #: Report keys logged as their own feedback score, in this order, when present
 #: and numeric. Deliberately a whitelist rather than "every number in the
@@ -84,7 +84,7 @@ METADATA_KEY = "rigor"
 #: probability is meaningless.
 STATISTIC_KEYS = ("lower_bound", "p_value", "mean", "p10", "stddev", "pass_rate")
 
-#: Feedback-score reasons are stored in a database column, not a blob. rigor's
+#: Feedback-score reasons are stored in a database column, not a blob. opik_rigor's
 #: gate messages are deliberately verbose (they are the statistical report), so
 #: they are truncated here rather than risking a rejected write that would lose
 #: the score *and* the reason.
@@ -101,12 +101,12 @@ _INSTALL_HINT = 'pip install "opik-rigor[opik]"'
 class OpikIntegrationError(RigorError):
     """Raised when the Opik integration cannot do its job.
 
-    A subclass rather than a bare :class:`~rigor.errors.RigorError` because of
+    A subclass rather than a bare :class:`~opik_rigor.errors.RigorError` because of
     how this integration is actually used: telemetry is wrapped in a ``try`` so
     that a dashboard being unavailable does not fail a test run. Catching
     ``RigorError`` there would also swallow
-    :class:`~rigor.errors.RubricDriftError` and
-    :class:`~rigor.errors.JudgeOutputError` -- errors that say the *measurement*
+    :class:`~opik_rigor.errors.RubricDriftError` and
+    :class:`~opik_rigor.errors.JudgeOutputError` -- errors that say the *measurement*
     is invalid and must never be quietly ignored. ``except
     OpikIntegrationError`` means exactly one thing: the logging failed, the
     evaluation did not.
@@ -125,7 +125,7 @@ def _import_opik() -> Any:
         raise OpikIntegrationError(
             f"the Opik integration requires the optional [opik] extra, which is not "
             f"installed. Install it with: {_INSTALL_HINT}  "
-            f"(rigor's core never imports Opik, so the assertions, the judge and the "
+            f"(opik_rigor's core never imports Opik, so the assertions, the judge and the "
             f"evidence log keep working without it -- you lose a dashboard, not a "
             f"test suite.)"
         ) from exc
@@ -142,7 +142,7 @@ def _jsonable(value: Any, _depth: int = 0) -> Any:
 
     Applied to everything before it is handed to Opik. The alternative -- trusting
     the SDK's encoder -- fails in the two ways that matter here: a
-    ``numpy.float64`` out of :mod:`rigor.distribution` is not a plain float and a
+    ``numpy.float64`` out of :mod:`opik_rigor.distribution` is not a plain float and a
     live exception object is not data, and a rejected payload is a *dropped*
     record rather than a raised one, so the loss would be invisible.
 
@@ -196,9 +196,9 @@ def _outcome_of(run: Run) -> str:
 
     Four values, not two. ``raised`` is checked first because a run that raised
     has no outcome to report, and the whole point of
-    :attr:`rigor.sampling.SampleResult.exceptions` is that it is not the failure
-    bucket. ``unrecorded`` exists for a hand-built :class:`~rigor.sampling.Run`
-    with ``outcome=None`` and no error -- :func:`rigor.sampling.sample` never
+    :attr:`opik_rigor.sampling.SampleResult.exceptions` is that it is not the failure
+    bucket. ``unrecorded`` exists for a hand-built :class:`~opik_rigor.sampling.Run`
+    with ``outcome=None`` and no error -- :func:`opik_rigor.sampling.sample` never
     produces one, and calling it a failure would invent a measurement.
     """
     if run.raised:
@@ -258,15 +258,15 @@ def log_sample_to_opik(
     metadata: Mapping[str, Any] | None = None,
     judge_name: str | None = None,
 ) -> str:
-    """Map a :class:`~rigor.sampling.SampleResult` to one Opik trace.
+    """Map a :class:`~opik_rigor.sampling.SampleResult` to one Opik trace.
 
     One trace, one span per run. The trace carries
-    :meth:`~rigor.sampling.SampleResult.summary` as both its ``output`` and its
+    :meth:`~opik_rigor.sampling.SampleResult.summary` as both its ``output`` and its
     metadata -- as output because that is what the sample produced, as metadata
     because that is where it is filterable.
 
-    Each span is ``type="llm"`` and is tagged ``rigor:passed``,
-    ``rigor:failed`` or ``rigor:raised``. A run that raised additionally gets
+    Each span is ``type="llm"`` and is tagged ``opik_rigor:passed``,
+    ``opik_rigor:failed`` or ``opik_rigor:raised``. A run that raised additionally gets
     Opik's ``error_info``, which is what makes it render as an error rather than
     as an unremarkable span with a falsey output. Keeping those two apart is not
     cosmetic: a sample where five runs raised and none failed is a broken
@@ -287,9 +287,9 @@ def log_sample_to_opik(
             handle to flush it with; a client you passed in is left alone, so
             your batching stays yours.
         project_name: Opik project. ``None`` uses the client's default.
-        tags: Extra trace tags, on top of ``"rigor"``. Order is preserved and
+        tags: Extra trace tags, on top of ``"opik_rigor"``. Order is preserved and
             duplicates are dropped.
-        metadata: Extra trace metadata, merged at the top level around rigor's
+        metadata: Extra trace metadata, merged at the top level around opik_rigor's
             own block. See :data:`METADATA_KEY`.
         judge_name: Recorded on the trace so a sample can be traced back to the
             judge that produced its verdicts. Optional because ``sample()`` does
@@ -304,7 +304,7 @@ def log_sample_to_opik(
 
     Note:
         No ``start_time``/``end_time`` is set on the spans. A
-        :class:`~rigor.sampling.SampleResult` records per-run *durations*, not
+        :class:`~opik_rigor.sampling.SampleResult` records per-run *durations*, not
         wall-clock positions, so any timestamps here would be invented -- and a
         concurrent sample would be drawn as a neat sequence of runs that in fact
         overlapped. The measured duration is on each span's metadata as
@@ -461,7 +461,7 @@ def log_assertion_to_opik(
 
     Feedback scores, not an Opik experiment. ``create_experiment`` /
     ``Experiment.insert`` require an experiment item to reference a **dataset
-    item that already exists in Opik**, which would mean rigor creating datasets
+    item that already exists in Opik**, which would mean opik_rigor creating datasets
     in your workspace as a side effect of logging a test result. That is a
     decision about your data, and it is yours; see COMPATIBILITY.md. If you want
     these verdicts inside an experiment, build the dataset yourself and pass the
@@ -474,7 +474,7 @@ def log_assertion_to_opik(
 
     Args:
         report: A gate report -- the dict returned by
-            :func:`rigor.distribution.assert_pass_rate` and friends, or the
+            :func:`opik_rigor.distribution.assert_pass_rate` and friends, or the
             ``.stats`` of the exception they raise. Must carry ``passed``. May
             carry ``message``; see :func:`_explanation`.
         trace_id: The trace to attach to, i.e. the return value of
@@ -497,7 +497,7 @@ def log_assertion_to_opik(
         raise ValueError(f"trace_id must be a non-empty string, got {trace_id!r}")
     if "passed" not in report:
         raise ValueError(
-            f"report has no 'passed' key, so it is not a rigor gate report: "
+            f"report has no 'passed' key, so it is not a opik_rigor gate report: "
             f"got keys {sorted(map(str, report))}"
         )
 

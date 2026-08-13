@@ -120,7 +120,7 @@ Save a rubric as `rubric.md` (the one in [`rubrics/example-rubric.md`](rubrics/e
 works), then:
 
 ```python
-from rigor import EvidenceLog, FakeAdapter, PinnedJudge, assert_pass_rate, sample
+from opik_rigor import EvidenceLog, FakeAdapter, PinnedJudge, assert_pass_rate, sample
 
 log = EvidenceLog("evidence.jsonl")
 adapter = FakeAdapter(  # a real judge would be AnthropicAdapter("claude-...-20250929")
@@ -136,7 +136,7 @@ assert_pass_rate(result, min_rate=0.9, evidence=log)
 This **fails**, and the failure is the point:
 
 ```
-rigor.distribution.PassRateError: pass rate gate failed: 18/20 passed (observed
+opik_rigor.distribution.PassRateError: pass rate gate failed: 18/20 passed (observed
 0.9000); one-sided 95% Wilson lower bound 0.7383 < min_rate 0.9000. Two-sided 95%
 interval [0.6990, 0.9721]. The observed rate 0.9000 clears min_rate 0.9000 but the
 lower bound does not: this is an underpowered sample, not a demonstrated failure.

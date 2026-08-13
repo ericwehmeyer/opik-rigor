@@ -5,7 +5,7 @@ be compared to a number it produced last month: the model id could not have been
 an alias, the rubric could not have changed unannounced, and every verdict --
 plus every response that failed to parse -- is on the record exactly once.
 
-The adapter here is a local scripted double rather than ``rigor.adapters.fake``:
+The adapter here is a local scripted double rather than ``opik_rigor.adapters.fake``:
 the judge's contract is the ``Adapter`` protocol, and these tests must hold for
 any object that satisfies it.
 """
@@ -18,15 +18,15 @@ from pathlib import Path
 
 import pytest
 
-from rigor.errors import JudgeOutputError, ModelPinError, RubricDriftError
-from rigor.evidence import (
+from opik_rigor.errors import JudgeOutputError, ModelPinError, RubricDriftError
+from opik_rigor.evidence import (
     EVENT_JUDGE_INIT,
     EVENT_JUDGE_PARSE_FAILURE,
     EVENT_JUDGE_VERDICT,
     EVENT_RUBRIC_CHANGE_ACCEPTED,
     EvidenceLog,
 )
-from rigor.judge import (
+from opik_rigor.judge import (
     OUTPUT_FORMAT_INSTRUCTION,
     SCORE_MAX,
     SCORE_MIN,

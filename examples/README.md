@@ -225,7 +225,7 @@ That is not politeness. rigor's core never imports an integration, so a dashboar
 that is down costs you a dashboard and not a test suite, and the example is built
 to demonstrate that rather than assert it.
 
-`rigor.integrations.opik` is imported *inside* the `--opik` branch. Without the
+`opik_rigor.integrations.opik` is imported *inside* the `--opik` branch. Without the
 flag the module is never touched at all.
 
 Two things to expect when you do have `opik` installed:

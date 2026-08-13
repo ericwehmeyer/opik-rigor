@@ -4,7 +4,7 @@ Two halves, and both of them run in every environment.
 
 The first half is about the *extra being missing*, and it is the half that runs
 on a machine where nobody has installed Opik. It asserts what a caller actually
-depends on: that importing ``rigor.integrations.opik`` works anyway, that
+depends on: that importing ``opik_rigor.integrations.opik`` works anyway, that
 calling into it says which extra to install rather than raising an ImportError
 from three frames down, and that merely importing the module does not drag Opik
 in. Absence is simulated with ``sys.modules["opik"] = None`` rather than assumed
@@ -48,7 +48,7 @@ from typing import Any
 
 import pytest
 
-from rigor import (
+from opik_rigor import (
     EvidenceLog,
     FakeAdapter,
     PassRateError,
@@ -57,7 +57,7 @@ from rigor import (
     assert_pass_rate,
     sample,
 )
-from rigor.integrations.opik import (
+from opik_rigor.integrations.opik import (
     SCORE_PREFIX,
     OpikIntegrationError,
     log_assertion_to_opik,
@@ -141,7 +141,7 @@ def opik_module(tmp_path_factory: pytest.TempPathFactory) -> Any:
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("OPIK_CONFIG_PATH", str(tmp_path_factory.mktemp("opik") / "absent.config"))
         patch.setenv("OPIK_URL_OVERRIDE", f"http://127.0.0.1:{port}/api")
-        patch.setenv("OPIK_API_KEY", "rigor-offline-tests")
+        patch.setenv("OPIK_API_KEY", "opik_rigor-offline-tests")
         patch.setenv("OPIK_WORKSPACE", "default")
         patch.setenv("OPIK_TRACK_DISABLE", "false")
         patch.setenv("OPIK_SENTRY_ENABLE", "false")
@@ -156,7 +156,7 @@ def opik_module(tmp_path_factory: pytest.TempPathFactory) -> Any:
 
 @pytest.fixture
 def client(opik_module: Any) -> Any:
-    return opik_module.Opik(project_name="rigor-integration-tests")
+    return opik_module.Opik(project_name="opik_rigor-integration-tests")
 
 
 def trace_by_id(storage: Any, trace_id: str) -> Any:
@@ -200,7 +200,7 @@ def span_outcomes(trace: Any) -> dict[str, int]:
     """How many spans reported each outcome, read back off the metadata."""
     counts: dict[str, int] = {}
     for span in trace.spans:
-        outcome = span.metadata["rigor"]["outcome"]
+        outcome = span.metadata["opik_rigor"]["outcome"]
         counts[outcome] = counts.get(outcome, 0) + 1
     return counts
 
@@ -219,7 +219,7 @@ def test_the_module_imports_with_the_opik_extra_absent() -> None:
     # Opik; re-importing by name states the guarantee explicitly, so that a
     # future top-level `import opik` fails here rather than at collection time
     # for the whole suite.
-    module = importlib.import_module("rigor.integrations.opik")
+    module = importlib.import_module("opik_rigor.integrations.opik")
 
     assert callable(module.log_sample_to_opik)
     assert callable(module.log_assertion_to_opik)
@@ -255,7 +255,7 @@ def test_importing_the_module_does_not_import_opik() -> None:
     # pytest plugin imports it before collection even starts. A fresh
     # interpreter is the only place the claim can actually be checked.
     code = (
-        "import sys; import rigor.integrations.opik; "
+        "import sys; import opik_rigor.integrations.opik; "
         "print('IMPORTED' if 'opik' in sys.modules else 'ABSENT')"
     )
     completed = subprocess.run(
@@ -285,15 +285,15 @@ def test_a_sample_becomes_one_trace_with_one_span_per_run(opik_module: Any, clie
     assert isinstance(trace_id, str) and trace_id
     assert len(trace.spans) == len(result.runs)
     assert {span.type for span in trace.spans} == {"llm"}
-    assert sorted(span.metadata["rigor"]["run_index"] for span in trace.spans) == list(
+    assert sorted(span.metadata["opik_rigor"]["run_index"] for span in trace.spans) == list(
         range(len(result.runs))
     )
     # The summary rides on the trace twice on purpose: as output because it is
     # what the sample produced, as metadata because that is where it is
     # filterable.
     assert trace.output == result.summary()
-    assert trace.metadata["rigor"]["sample"] == result.summary()
-    assert trace.tags == ["rigor", "nightly"]
+    assert trace.metadata["opik_rigor"]["sample"] == result.summary()
+    assert trace.tags == ["opik_rigor", "nightly"]
 
 
 def test_a_run_that_raised_is_distinguishable_from_a_run_that_failed(
@@ -308,8 +308,8 @@ def test_a_run_that_raised_is_distinguishable_from_a_run_that_failed(
 
     assert span_outcomes(trace) == {"passed": 4, "failed": 3, "raised": 2}
 
-    raised = [span for span in trace.spans if span.metadata["rigor"]["outcome"] == "raised"]
-    failed = [span for span in trace.spans if span.metadata["rigor"]["outcome"] == "failed"]
+    raised = [span for span in trace.spans if span.metadata["opik_rigor"]["outcome"] == "raised"]
+    failed = [span for span in trace.spans if span.metadata["opik_rigor"]["outcome"] == "failed"]
     assert len(raised) == 2
 
     for span in raised:
@@ -319,24 +319,24 @@ def test_a_run_that_raised_is_distinguishable_from_a_run_that_failed(
         assert span.error_info["exception_type"] == "ProviderOutage"
         assert OUTAGE_MESSAGE in span.error_info["message"]
         assert "ProviderOutage" in span.error_info["traceback"]
-        assert span.metadata["rigor"]["error_type"] == "ProviderOutage"
-        assert span.metadata["rigor"]["error_message"] == OUTAGE_MESSAGE
-        assert span.metadata["rigor"]["raised"] is True
-        assert "rigor:raised" in span.tags
+        assert span.metadata["opik_rigor"]["error_type"] == "ProviderOutage"
+        assert span.metadata["opik_rigor"]["error_message"] == OUTAGE_MESSAGE
+        assert span.metadata["opik_rigor"]["raised"] is True
+        assert "opik_rigor:raised" in span.tags
         # And it must not read as an ordinary failure anywhere a filter looks.
-        assert "rigor:failed" not in span.tags
+        assert "opik_rigor:failed" not in span.tags
         assert span.output["outcome"] == "raised"
 
     for span in failed:
         # The converse: a genuine failure carries no error, or an error-rate
         # dashboard would count model quality as provider breakage.
         assert span.error_info is None
-        assert span.metadata["rigor"]["raised"] is False
-        assert span.metadata["rigor"]["error_type"] is None
-        assert "rigor:failed" in span.tags
-        assert "rigor:raised" not in span.tags
+        assert span.metadata["opik_rigor"]["raised"] is False
+        assert span.metadata["opik_rigor"]["error_type"] is None
+        assert "opik_rigor:failed" in span.tags
+        assert "opik_rigor:raised" not in span.tags
 
-    assert trace.metadata["rigor"]["outcomes"] == {"passed": 4, "failed": 3, "raised": 2}
+    assert trace.metadata["opik_rigor"]["outcomes"] == {"passed": 4, "failed": 3, "raised": 2}
 
 
 def test_a_passing_gate_attaches_feedback_scores_naming_the_gate(
@@ -408,7 +408,7 @@ def test_a_report_without_a_verdict_is_refused_rather_than_guessed(
 def test_numpy_scalars_are_converted_before_they_cross_the_wire(
     opik_module: Any, client: Any
 ) -> None:
-    # numpy leaks in from rigor.distribution's reports and from any caller who
+    # numpy leaks in from opik_rigor.distribution's reports and from any caller who
     # computes their own metadata. np.int64 is not a Python int and a JSON
     # encoder refuses it -- and a refused payload is a *dropped* record, not a
     # raised one, so the loss would be invisible on the dashboard.
@@ -473,11 +473,11 @@ def test_a_real_judged_sample_round_trips_into_opik(
         "failed": result.failures,
         "raised": len(result.exceptions),
     }
-    assert trace.metadata["rigor"]["judge_name"] == "round"
+    assert trace.metadata["opik_rigor"]["judge_name"] == "round"
     assert trace.metadata["rubric_hash"] == judge.rubric_hash
     assert trace.output["pass_rate"] == pytest.approx(result.pass_rate)
 
     # Durations survive as data even though no timestamps are invented for them.
-    durations = [span.metadata["rigor"]["duration_seconds"] for span in trace.spans]
+    durations = [span.metadata["opik_rigor"]["duration_seconds"] for span in trace.spans]
     assert len(durations) == 60
     assert all(isinstance(value, float) for value in durations)

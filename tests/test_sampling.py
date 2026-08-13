@@ -25,10 +25,10 @@ from typing import Any
 
 import pytest
 
-from rigor.adapters.fake import FakeAdapter
-from rigor.evidence import EVENT_SAMPLE_COMPLETED, EvidenceLog
-from rigor.judge import Verdict
-from rigor.sampling import (
+from opik_rigor.adapters.fake import FakeAdapter
+from opik_rigor.evidence import EVENT_SAMPLE_COMPLETED, EvidenceLog
+from opik_rigor.judge import Verdict
+from opik_rigor.sampling import (
     Run,
     SampleResult,
     SampleTimeout,
@@ -342,7 +342,7 @@ def test_timeout_error_raised_by_fn_is_preserved_on_the_concurrent_path() -> Non
     # Regression test. _run_pool used to collect with future.result(timeout=...),
     # whose concurrent.futures.TimeoutError has *been* builtins.TimeoutError since
     # Python 3.11 -- so a provider's own socket timeout was caught as if it were
-    # rigor's budget expiring, and the original exception was replaced with a
+    # opik_rigor's budget expiring, and the original exception was replaced with a
     # fabricated SampleTimeout. A provider outage must never be misreported as our
     # own timeout: they are facts about different systems.
     raised = TimeoutError("provider socket timeout")

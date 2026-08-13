@@ -1,20 +1,20 @@
-"""rigor -- statistical assertions and pinned-judge evaluation for LLM test suites.
+"""opik_rigor -- statistical assertions and pinned-judge evaluation for LLM test suites.
 
 Two primitives:
 
-* :class:`~rigor.judge.PinnedJudge` -- an LLM-as-judge that refuses an aliased
+* :class:`~opik_rigor.judge.PinnedJudge` -- an LLM-as-judge that refuses an aliased
   model id, hashes its rubric, and raises when the rubric changes underneath a
   recorded baseline.
-* the statistical gates in ``rigor.distribution`` (Session 2) -- assertions that
+* the statistical gates in ``opik_rigor.distribution`` (Session 2) -- assertions that
   account for having sampled a stochastic system n times rather than measured it
   once.
 
-Both write to an append-only :class:`~rigor.evidence.EvidenceLog` that has no
+Both write to an append-only :class:`~opik_rigor.evidence.EvidenceLog` that has no
 delete API.
 
 Nothing here imports an integration or a provider SDK at module scope: importing
-``rigor`` must work with no credentials, no network, and neither the ``anthropic``
-nor ``openai`` package installed. Integrations live under ``rigor.integrations``
+``opik_rigor`` must work with no credentials, no network, and neither the ``anthropic``
+nor ``openai`` package installed. Integrations live under ``opik_rigor.integrations``
 and import core, never the other way round.
 """
 

@@ -1,6 +1,6 @@
 """Tests for the model-id pinning rules.
 
-``is_pinned`` is the single definition of "reproducible model id" in rigor, so
+``is_pinned`` is the single definition of "reproducible model id" in opik_rigor, so
 these tests fix both halves of it: an id ending in a concrete version marker is
 accepted, and anything that can silently re-point under the caller is refused --
 including every token in :data:`ALIAS_TOKENS`, iterated rather than hardcoded so
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from rigor.errors import ModelPinError
-from rigor.pinning import ALIAS_TOKENS, is_pinned, require_pinned
+from opik_rigor.errors import ModelPinError
+from opik_rigor.pinning import ALIAS_TOKENS, is_pinned, require_pinned
 
 PINNED_IDS = [
     "claude-opus-4-20250514",

@@ -1,8 +1,18 @@
 # PROGRESS
 
 Running state of the v0.1 build. Updated at the end of every session. If you are
-picking this up cold, read this file and `docs/` — nothing important lives only in
-a chat transcript.
+picking this up cold, read this file, then [README.md](README.md) for what the
+library does and [COMPATIBILITY.md](COMPATIBILITY.md) for what the Opik
+integration was verified against — nothing important lives only in a chat
+transcript.
+
+[docs/build-plan.md](docs/build-plan.md) is the plan this build followed, committed
+**verbatim and unedited**, including the parts it got wrong. It was written and
+approved before any code existed: module contracts, session boundaries sized to fit
+in one context window, a test inventory used as the acceptance contract, and
+pre-decided answers to the risks. It is here as evidence rather than as
+documentation — a plan edited after the fact to match what happened is not a plan,
+it is a reconstruction.
 
 ## Where the build stands
 
@@ -17,22 +27,22 @@ a chat transcript.
 
 | Module | State | Tests |
 |---|---|---|
-| `src/rigor/errors.py` | done | exercised via the modules that raise |
-| `src/rigor/evidence.py` | done | `tests/test_evidence.py` — 72 |
-| `src/rigor/pinning.py` | done | `tests/test_pinning.py` — 21 |
-| `src/rigor/adapters/base.py` | done — Protocol, env constants, credential guards | via adapter tests |
-| `src/rigor/adapters/{fake,anthropic,openai_compat}.py` | done | `tests/test_adapters.py` — 66 (+1 network-skipped) |
-| `src/rigor/judge.py` | done | `tests/test_judge.py` — 46 |
+| `src/opik_rigor/errors.py` | done | exercised via the modules that raise |
+| `src/opik_rigor/evidence.py` | done | `tests/test_evidence.py` — 72 |
+| `src/opik_rigor/pinning.py` | done | `tests/test_pinning.py` — 21 |
+| `src/opik_rigor/adapters/base.py` | done — Protocol, env constants, credential guards | via adapter tests |
+| `src/opik_rigor/adapters/{fake,anthropic,openai_compat}.py` | done | `tests/test_adapters.py` — 66 (+1 network-skipped) |
+| `src/opik_rigor/judge.py` | done | `tests/test_judge.py` — 46 |
 | `rubrics/example-rubric.md` | done | asserted to end with `OUTPUT_FORMAT_INSTRUCTION` |
-| `src/rigor/__init__.py` | done — re-exports the public surface | `tests/test_integration_session1.py` — 13 |
+| `src/opik_rigor/__init__.py` | done — re-exports the public surface | `tests/test_integration_session1.py` — 13 |
 
 ## Session 2 — module status
 
 | Module | State | Tests |
 |---|---|---|
-| `src/rigor/sampling.py` | done | `tests/test_sampling.py` — 64 |
-| `src/rigor/distribution.py` | done | `tests/test_distribution.py` — 118 |
-| `src/rigor/baseline.py` | done | `tests/test_baseline.py` — 64 |
+| `src/opik_rigor/sampling.py` | done | `tests/test_sampling.py` — 64 |
+| `src/opik_rigor/distribution.py` | done | `tests/test_distribution.py` — 118 |
+| `src/opik_rigor/baseline.py` | done | `tests/test_baseline.py` — 64 |
 | dogfooding suite | done | `tests/test_integration_session2.py` — 9 |
 
 **Implementation and tests were written by different authors, deliberately.** The
@@ -67,8 +77,8 @@ stake in the implementation:
 | Module | State | Tests |
 |---|---|---|
 | `COMPATIBILITY.md` | written **before** any integration code | — |
-| `src/rigor/integrations/opik.py` | done | `tests/test_integration_opik.py` — 11 |
-| `src/rigor/integrations/pytest_plugin.py` | done | `tests/test_pytest_plugin.py` — 15 |
+| `src/opik_rigor/integrations/opik.py` | done | `tests/test_integration_opik.py` — 11 |
+| `src/opik_rigor/integrations/pytest_plugin.py` | done | `tests/test_pytest_plugin.py` — 15 |
 | `examples/summarise_eval.py` + README | done | `examples/test_example_runs.py` — 19 |
 
 Two environments are maintained: `.venv` (no Opik — the suite must be green
@@ -179,12 +189,12 @@ Windows across Python 3.10–3.13.
 ## Invariants that must survive every later session
 
 1. **Core never imports integrations.** `integrations/` may import core; nothing in
-   `src/rigor/*.py` may import `rigor.integrations` or any provider SDK at module
+   `src/opik_rigor/*.py` may import `opik_rigor.integrations` or any provider SDK at module
    scope.
 2. **The suite is green with no credentials present.** CI blanks `ANTHROPIC_API_KEY`
    and `OPENAI_API_KEY`. Anything needing a live endpoint is marked
    `requires_network` or `requires_opik` and deselected.
-3. **`import rigor.adapters` must not require a provider SDK.** The `anthropic` and
+3. **`import opik_rigor.adapters` must not require a provider SDK.** The `anthropic` and
    `openai` imports are lazy, inside `complete()`.
 4. **A parse failure is never a fail-verdict.** Unparseable judge output is missing
    data; scoring it as a failure biases every statistic downstream of it.

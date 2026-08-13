@@ -8,7 +8,7 @@ number it ever produced:
 * **the rubric**, when someone edits the prompt file between runs.
 
 :class:`PinnedJudge` refuses the first at construction time (via
-:func:`rigor.pinning.require_pinned`) and detects the second by hashing the
+:func:`opik_rigor.pinning.require_pinned`) and detects the second by hashing the
 rubric file and comparing it to the hash recorded in the evidence log. A change
 is an error, not a warning -- scores either side of a rubric edit are not
 comparable, and the only honest options are "don't edit it" or "say out loud
@@ -115,7 +115,7 @@ def hash_rubric_text(data: bytes) -> str:
 
     Without this the same rubric file hashes differently on a Windows checkout
     (``\\r\\n``) and a Linux CI runner (``\\n``), and since CI runs both, every
-    cross-platform run would raise :class:`~rigor.errors.RubricDriftError` for a
+    cross-platform run would raise :class:`~opik_rigor.errors.RubricDriftError` for a
     file nobody touched. Normalising the *bytes we hash* -- not the file -- keeps
     the identity of a rubric tied to its content rather than to git's autocrlf
     setting, while leaving the file on disk exactly as checked out.
@@ -128,7 +128,7 @@ def hash_rubric_file(path: str | os.PathLike[str]) -> str:
 
     A missing rubric raises :class:`FileNotFoundError` unchanged: it is an
     ordinary filesystem mistake, not a judgement about a model, so it does not
-    earn a rigor-specific exception type.
+    earn a opik_rigor-specific exception type.
     """
     return hash_rubric_text(Path(path).read_bytes())
 
@@ -227,7 +227,7 @@ class PinnedJudge:
         double-counted verdict skews every rate computed from the log).
 
         A response that cannot be parsed raises
-        :class:`~rigor.errors.JudgeOutputError` *after* the raw text is recorded,
+        :class:`~opik_rigor.errors.JudgeOutputError` *after* the raw text is recorded,
         so the failure survives even though the call does not return. It is
         deliberately never turned into ``passed=False``: an unparseable answer is
         missing data, and folding missing data into the failure bucket biases the

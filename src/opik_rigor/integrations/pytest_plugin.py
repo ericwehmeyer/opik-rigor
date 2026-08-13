@@ -5,7 +5,7 @@ least resistance inside an ordinary test suite. Without it, a team testing a
 stochastic system reaches for a retry plugin -- rerun until it goes green -- which
 measures nothing and hides everything. ``@pytest.mark.rigor_repeat`` runs the same
 body n times and gates the result with
-:func:`rigor.distribution.assert_pass_rate`, so the reported outcome is a
+:func:`opik_rigor.distribution.assert_pass_rate`, so the reported outcome is a
 confidence bound rather than one lucky draw.
 
 Three properties are deliberate.
@@ -13,7 +13,7 @@ Three properties are deliberate.
 **Failure and exception stay apart.** A body that returns normally is a pass; a
 body that raises ``AssertionError`` is a **failure** -- the system under test ran
 and missed the bar; any other exception is an **exception** -- the harness broke.
-That distinction is :mod:`rigor.sampling`'s central thesis (a provider outage must
+That distinction is :mod:`opik_rigor.sampling`'s central thesis (a provider outage must
 not read as a quality regression) and this plugin is the place where it would be
 easiest to flatten, since pytest itself calls both "a failing test". It is not
 flattened: assertions become ``outcome=False`` observations, everything else is
@@ -21,8 +21,8 @@ recorded as ``Run.error`` and lands in the exception bucket, and both counts are
 printed before the gate runs so the two are distinguishable in the output.
 
 **Nothing here imports Opik.** Opik ships its own ``pytest11`` entry point named
-``opik``; ours is named ``rigor``, uses a marker rather than a function decorator,
-and prefixes every marker, fixture and ini option with ``rigor``. Loading both
+``opik``; ours is named ``opik_rigor``, uses a marker rather than a function decorator,
+and prefixes every marker, fixture and ini option with ``opik_rigor``. Loading both
 changes nothing about either. See ``COMPATIBILITY.md``.
 
 **Importing this module does no work.** It defines hooks and fixtures and nothing
@@ -39,18 +39,18 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from rigor.distribution import DEFAULT_CONFIDENCE, assert_pass_rate
-from rigor.evidence import EVENT_SAMPLE_COMPLETED, EvidenceLog
-from rigor.judge import PinnedJudge
-from rigor.sampling import sample
+from opik_rigor.distribution import DEFAULT_CONFIDENCE, assert_pass_rate
+from opik_rigor.evidence import EVENT_SAMPLE_COMPLETED, EvidenceLog
+from opik_rigor.judge import PinnedJudge
+from opik_rigor.sampling import sample
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps import cost at zero
     import os
 
-    from rigor.adapters.base import Adapter
-    from rigor.sampling import SampleResult
+    from opik_rigor.adapters.base import Adapter
+    from opik_rigor.sampling import SampleResult
 
-#: The marker, the fixtures and the ini option are all ``rigor``-prefixed. The
+#: The marker, the fixtures and the ini option are all ``opik_rigor``-prefixed. The
 #: plugin shares a process with whatever else the user has installed, and an
 #: unprefixed name like ``repeat`` or ``evidence`` is a collision waiting for the
 #: one suite that already had its own.
@@ -59,11 +59,11 @@ INI_EVIDENCE_PATH = "rigor_evidence_path"
 
 #: Where ``rigor_evidence`` writes when no path is configured. One file per test,
 #: inside pytest's own ``tmp_path``, so the log is per-test and self-cleaning.
-DEFAULT_EVIDENCE_FILENAME = "rigor-evidence.jsonl"
+DEFAULT_EVIDENCE_FILENAME = "opik_rigor-evidence.jsonl"
 
 _MARKER_HELP = (
     "rigor_repeat(n, min_rate, confidence=0.95, errors_as_failures=True): run this "
-    "test n times and gate the pass rate with rigor.assert_pass_rate. A body that "
+    "test n times and gate the pass rate with opik_rigor.assert_pass_rate. A body that "
     "returns is a pass, one that raises AssertionError is a failure, any other "
     "exception is an exception (harness broke, not the system under test)."
 )
@@ -181,7 +181,7 @@ def _repeat_once(testfunction: Callable[..., Any], testargs: dict[str, Any]) -> 
     * returns normally -> ``True``, a pass;
     * raises ``AssertionError`` (or ``pytest.fail()``) -> ``False``, a **failure**:
       the system under test ran and its output missed the bar;
-    * raises anything else -> propagates, so :func:`rigor.sampling.sample` records
+    * raises anything else -> propagates, so :func:`opik_rigor.sampling.sample` records
       it as an **exception**: the harness broke and this run produced no
       observation at all.
 
@@ -250,7 +250,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
     if _is_coroutine_function(testfunction):
         raise TypeError(
             f"{MARKER_NAME} cannot repeat the async test {pyfuncitem.name!r}: another "
-            f"plugin owns the call for coroutine tests, so rigor would run the body "
+            f"plugin owns the call for coroutine tests, so opik_rigor would run the body "
             f"n times without ever awaiting it and score n meaningless passes"
         )
 
@@ -329,7 +329,7 @@ def _evidence_path(config: pytest.Config, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def rigor_evidence(request: pytest.FixtureRequest, tmp_path: Path) -> EvidenceLog:
-    """An :class:`~rigor.evidence.EvidenceLog` for this test.
+    """An :class:`~opik_rigor.evidence.EvidenceLog` for this test.
 
     Defaults to a per-test file under pytest's ``tmp_path``, which is the right
     default for a fixture: evidence from one test cannot be confused with
@@ -345,7 +345,7 @@ def rigor_evidence(request: pytest.FixtureRequest, tmp_path: Path) -> EvidenceLo
 
 @pytest.fixture
 def rigor_judge(rigor_evidence: EvidenceLog) -> Callable[..., PinnedJudge]:
-    """Factory building a :class:`~rigor.judge.PinnedJudge` on this test's log.
+    """Factory building a :class:`~opik_rigor.judge.PinnedJudge` on this test's log.
 
     Deliberately thin: it wires the evidence log and forwards everything else
     verbatim, so the judge's real contract -- model pinning, rubric hashing,

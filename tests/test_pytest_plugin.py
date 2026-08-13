@@ -26,17 +26,17 @@ from pathlib import Path
 
 import pytest
 
-from rigor import EvidenceLog, wilson_lower_bound
-from rigor.evidence import EVENT_ASSERTION, EVENT_SAMPLE_COMPLETED
+from opik_rigor import EvidenceLog, wilson_lower_bound
+from opik_rigor.evidence import EVENT_ASSERTION, EVENT_SAMPLE_COMPLETED
 
 pytest_plugins = ["pytester"]
 
 #: How the inner runs load the plugin under test -- nothing, now that
 #: ``pyproject.toml`` declares the ``pytest11`` entry point and pytest loads it
-#: automatically. Passing ``-p rigor.integrations.pytest_plugin`` as well is not
+#: automatically. Passing ``-p opik_rigor.integrations.pytest_plugin`` as well is not
 #: merely redundant, it is fatal: pluggy registers the module under the dotted
 #: name, then entry-point loading tries to register the *same module object*
-#: under the name ``rigor`` and raises "Plugin already registered under a
+#: under the entry-point name ``rigor`` and raises "Plugin already registered under a
 #: different name". Kept as a named empty tuple so the call sites still read as
 #: "however the plugin gets loaded", and so re-adding an argument is one edit.
 PLUGIN_ARGS: tuple[str, ...] = ()
@@ -383,7 +383,7 @@ def test_the_judge_fixture_builds_a_judge_that_records_its_verdict(
         test_inner_judge="""
         import pathlib
 
-        from rigor import FakeAdapter
+        from opik_rigor import FakeAdapter
 
         RUBRIC = pathlib.Path(__file__).with_name("rubric.md")
         VERDICT = '{"pass": true, "score": 5, "reason": "faithful to the source"}'
@@ -454,7 +454,7 @@ def test_a_repeated_test_records_its_sample_and_gate_in_the_evidence_log(
 @pytest.mark.requires_opik
 def test_both_plugins_load_and_collect_together(pytester: pytest.Pytester) -> None:
     # The check the build plan calls for. Opik registers a pytest11 entry point
-    # named `opik`; ours is named `rigor`. A subprocess run is used so both are
+    # named `opik`; ours is named `opik_rigor`. A subprocess run is used so both are
     # loaded the way a user's environment loads them -- from entry points -- and
     # not because this process happens to have imported them already.
     pytest.importorskip("opik")
@@ -464,7 +464,7 @@ def test_both_plugins_load_and_collect_together(pytester: pytest.Pytester) -> No
         import pathlib
 
         import pytest
-        from rigor import FakeAdapter
+        from opik_rigor import FakeAdapter
 
         RUBRIC = pathlib.Path(__file__).with_name("rubric.md")
         VERDICT = '{"pass": true, "score": 4, "reason": "close enough"}'
@@ -492,9 +492,9 @@ def test_both_plugins_load_and_collect_together(pytester: pytest.Pytester) -> No
 def test_opik_stays_inert_when_no_llm_unit_tests_are_collected(
     pytester: pytest.Pytester,
 ) -> None:
-    # rigor must never switch Opik on: no --opik, no opik_pytest_enabled. With
+    # opik_rigor must never switch Opik on: no --opik, no opik_pytest_enabled. With
     # neither set and no llm_unit-decorated test collected, Opik's plugin does
-    # nothing at all, so installing rigor changes nothing about an Opik user's
+    # nothing at all, so installing opik_rigor changes nothing about an Opik user's
     # suite (and vice versa).
     pytest.importorskip("opik")
     pytester.makepyfile(
@@ -525,7 +525,7 @@ def test_opik_stays_inert_when_no_llm_unit_tests_are_collected(
 
 @pytest.mark.requires_opik
 def test_the_plugin_never_imports_opik(pytester: pytest.Pytester) -> None:
-    # The rule that keeps rigor's core independent of a vendor SDK, checked where
+    # The rule that keeps opik_rigor's core independent of a vendor SDK, checked where
     # it is easiest to break: an entry-point plugin is imported in every pytest
     # process on the machine, so an import of opik here would be a hard dependency
     # in disguise.
@@ -540,14 +540,14 @@ def test_the_plugin_never_imports_opik(pytester: pytest.Pytester) -> None:
                 if name == "opik" or name.startswith("opik."):
                     del sys.modules[name]
 
-            import rigor.integrations.pytest_plugin  # noqa: F401
+            import opik_rigor.integrations.pytest_plugin  # noqa: F401
 
             assert not [name for name in sys.modules if name.split(".")[0] == "opik"]
         """
     )
 
     # -p no:opik keeps Opik's own plugin from importing opik on our behalf; the
-    # question here is only what rigor's module pulls in.
+    # question here is only what opik_rigor's module pulls in.
     result = pytester.runpytest_subprocess("-p", "no:opik", *PLUGIN_ARGS)
 
     result.assert_outcomes(passed=1)

@@ -1,6 +1,6 @@
 """Append-only evidence log.
 
-Everything in rigor that produces a fact about a model -- a verdict, a rubric
+Everything in opik_rigor that produces a fact about a model -- a verdict, a rubric
 hash, a rejected model id, a sampling run -- writes it here and nowhere else.
 
 The log is JSONL with a fixed envelope::

@@ -188,7 +188,7 @@ The page `comet.com/docs/opik/testing/pytest_integration` 404s; the live one is
 
 ## What to do when this drifts
 
-The integration is two functions in `src/rigor/integrations/opik.py`. If an Opik
+The integration is two functions in `src/opik_rigor/integrations/opik.py`. If an Opik
 release breaks them:
 
 1. Re-run the introspection in a clean venv and update the table at the top.

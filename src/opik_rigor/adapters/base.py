@@ -1,6 +1,6 @@
 """The provider seam.
 
-One method, one property. Everything rigor needs from a model provider is "give
+One method, one property. Everything opik_rigor needs from a model provider is "give
 me a string back for this string, and tell me exactly which model produced it."
 
 Adapters never accept credentials as constructor arguments -- keys come from the

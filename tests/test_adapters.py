@@ -4,7 +4,7 @@ Three properties are load-bearing enough to test rather than assume:
 
 * a credential never becomes a constructor argument, a ``repr``, or an exception
   message -- the tests plant a sentinel key in the environment and hunt for it;
-* ``import rigor.adapters`` never imports a provider SDK, checked in a subprocess
+* ``import opik_rigor.adapters`` never imports a provider SDK, checked in a subprocess
   so it holds whether or not one happens to be installed;
 * :class:`FakeAdapter` hands out exactly the scripted responses, in order, under
   concurrency, and reproducibly under a seed -- because every statistical gate in
@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from rigor.adapters import (
+from opik_rigor.adapters import (
     ENV_ANTHROPIC_API_KEY,
     ENV_OPENAI_API_KEY,
     ENV_OPENAI_BASE_URL,
@@ -33,7 +33,7 @@ from rigor.adapters import (
     FakeAdapter,
     OpenAICompatAdapter,
 )
-from rigor.pinning import is_pinned
+from opik_rigor.pinning import is_pinned
 
 ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
 OPENAI_MODEL = "gpt-4o-2024-08-06"
@@ -70,7 +70,7 @@ def test_importing_the_adapters_does_not_import_a_provider_sdk() -> None:
     # this one tests the code, and holds either way. A subprocess is the only honest
     # check, since this session has already imported half the world.
     code = (
-        "import sys, rigor.adapters; "
+        "import sys, opik_rigor.adapters; "
         "print(','.join(sorted(m for m in sys.modules "
         "if m.split('.')[0] in ('anthropic', 'openai'))))"
     )
@@ -81,7 +81,7 @@ def test_importing_the_adapters_does_not_import_a_provider_sdk() -> None:
 
 
 def test_the_adapter_package_exposes_its_documented_surface() -> None:
-    import rigor.adapters as adapters
+    import opik_rigor.adapters as adapters
 
     assert set(adapters.__all__) == {
         "ENV_ANTHROPIC_API_KEY",

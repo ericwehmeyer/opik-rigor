@@ -52,7 +52,7 @@ def default_outcome(value: Any) -> bool:
     """Decide whether one returned value counts as a pass.
 
     Understands the two things a caller actually returns -- a
-    :class:`~rigor.judge.Verdict` (use ``.passed``) or a plain ``bool`` -- and
+    :class:`~opik_rigor.judge.Verdict` (use ``.passed``) or a plain ``bool`` -- and
     refuses anything else. Truthiness is not used on purpose: a non-empty string
     of judge prose is truthy, and silently scoring it as a pass would manufacture
     a measurement out of an unparsed response.

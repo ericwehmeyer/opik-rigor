@@ -1,37 +1,44 @@
-"""Adapter for the Anthropic Messages API.
+"""Adapter for any endpoint that speaks the OpenAI chat-completions protocol.
 
-Thin on purpose: validate the configuration, read the key from the environment,
-make one call, hand back one string. Anything cleverer -- retries, caching,
-streaming -- would sit between the model and the evidence log, and the whole
-point of this library is that what got recorded is what the model said.
+Named ``openai_compat`` rather than ``openai`` because the protocol has outlived
+the vendor: Azure AI Foundry, vLLM, Ollama, Together and most gateways serve the
+same ``/chat/completions`` shape. Point ``base_url`` at one of those and this
+adapter judges against it unchanged -- which is the difference between a library
+you can run inside a corporate network and one you cannot.
 
-There is no default ``model_id``. A default would be an alias in disguise: the
-library would silently start judging with a different set of weights the day it
-was bumped, and every score recorded before the bump would quietly stop being
-comparable. The caller names the exact version.
+As with the Anthropic adapter there is no default ``model_id``: a default would
+re-point under you, and a score recorded against a moving target is not evidence.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any
 
 from .base import (
-    ENV_ANTHROPIC_API_KEY,
+    ENV_OPENAI_API_KEY,
+    ENV_OPENAI_BASE_URL,
     AdapterError,
     reject_credential_kwargs,
     require_env_key,
 )
 
-#: The provider SDK, imported lazily -- see :meth:`AnthropicAdapter._sdk_client`.
-PACKAGE = "anthropic"
+#: The provider SDK, imported lazily -- see :meth:`OpenAICompatAdapter._sdk_client`.
+PACKAGE = "openai"
 
 
-class AnthropicAdapter:
-    """Single-turn completions from a pinned Anthropic model.
+class OpenAICompatAdapter:
+    """Single-turn completions from a pinned OpenAI-protocol model.
 
     Args:
-        model_id: Exact model version, e.g. ``claude-sonnet-4-5-20250929``.
+        model_id: Exact model version, e.g. ``gpt-4o-2024-08-06``, or whatever
+            deployment name the compatible endpoint serves.
+        base_url: The endpoint root, e.g. an Azure AI Foundry deployment URL or a
+            self-hosted vLLM server. Falls back to ``OPENAI_BASE_URL`` and then to
+            the SDK's own default, so the same code runs against a gateway in CI
+            and against api.openai.com on a laptop with nothing but an env var
+            changing.
         max_tokens: Cap on the response length.
         temperature: Defaults to ``0.0`` -- a judge that is asked the same
             question twice should answer it the same way.
@@ -39,13 +46,14 @@ class AnthropicAdapter:
 
     Raises:
         TypeError: If a credential keyword is passed.
-        AdapterError: If ``ANTHROPIC_API_KEY`` is unset or empty.
+        AdapterError: If ``OPENAI_API_KEY`` is unset or empty.
     """
 
     def __init__(
         self,
         model_id: str,
         *,
+        base_url: str | None = None,
         max_tokens: int = 1024,
         temperature: float = 0.0,
         timeout: float = 60.0,
@@ -55,26 +63,35 @@ class AnthropicAdapter:
 
         if not isinstance(model_id, str) or not model_id.strip():
             raise ValueError(f"model_id must be a non-empty string, got {model_id!r}")
+        if base_url is not None and (not isinstance(base_url, str) or not base_url.strip()):
+            raise ValueError(f"base_url must be a non-empty string or None, got {base_url!r}")
         if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 1:
             raise ValueError(f"max_tokens must be a positive int, got {max_tokens!r}")
-        if not 0.0 <= float(temperature) <= 1.0:
-            raise ValueError(f"temperature must be between 0.0 and 1.0, got {temperature!r}")
+        if not 0.0 <= float(temperature) <= 2.0:
+            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature!r}")
         if float(timeout) <= 0:
             raise ValueError(f"timeout must be > 0 seconds, got {timeout!r}")
 
         self._model_id = model_id.strip()
+        resolved = base_url if base_url is not None else os.environ.get(ENV_OPENAI_BASE_URL, "")
+        self._base_url = resolved.strip() or None
         self._max_tokens = max_tokens
         self._temperature = float(temperature)
         self._timeout = float(timeout)
         # Private, and deliberately absent from __repr__ and from every message
         # this module raises. See _redact.
-        self._api_key = require_env_key(ENV_ANTHROPIC_API_KEY, type(self).__name__)
+        self._api_key = require_env_key(ENV_OPENAI_API_KEY, type(self).__name__)
         self._client: Any | None = None
         self._client_lock = threading.Lock()
 
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    @property
+    def base_url(self) -> str | None:
+        """The resolved endpoint root, or ``None`` to use the SDK's default."""
+        return self._base_url
 
     @property
     def max_tokens(self) -> int:
@@ -93,25 +110,26 @@ class AnthropicAdapter:
             raise TypeError(f"prompt must be a string, got {type(prompt).__name__}")
         client = self._sdk_client()
         try:
-            message = client.messages.create(
+            response = client.chat.completions.create(
                 model=self._model_id,
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
-                messages=[{"role": "user", "content": prompt}],
             )
         except Exception as exc:  # provider SDKs raise their own hierarchy
             raise AdapterError(
-                f"anthropic call failed for model {self._model_id!r}: "
+                f"openai-compatible call failed for model {self._model_id!r} at "
+                f"{self._base_url or 'the SDK default endpoint'}: "
                 f"{type(exc).__name__}: {self._redact(exc)}"
             ) from exc
-        return self._extract_text(message)
+        return self._extract_text(response)
 
     def _sdk_client(self) -> Any:
         """Import the SDK and build a client on first use.
 
-        The import is lazy because ``import rigor.adapters`` must succeed on a
+        The import is lazy because ``import opik_rigor.adapters`` must succeed on a
         machine that has never installed a provider SDK -- the fake adapter runs
-        the entire test suite, and requiring ``anthropic`` to collect those tests
+        the entire test suite, and requiring ``openai`` to collect those tests
         would make the dependency mandatory for people who never call a provider.
 
         The client is cached because a sampler makes hundreds of calls from a
@@ -121,42 +139,40 @@ class AnthropicAdapter:
         with self._client_lock:
             if self._client is None:
                 try:
-                    import anthropic
+                    import openai
                 except ImportError as exc:
                     raise AdapterError(
                         f"{type(self).__name__} needs the {PACKAGE!r} package, which is not "
                         f"installed. Install it with: pip install {PACKAGE}"
                     ) from exc
+                kwargs: dict[str, Any] = {"api_key": self._api_key, "timeout": self._timeout}
+                if self._base_url is not None:
+                    kwargs["base_url"] = self._base_url
                 try:
-                    self._client = anthropic.Anthropic(
-                        api_key=self._api_key, timeout=self._timeout
-                    )
+                    self._client = openai.OpenAI(**kwargs)
                 except Exception as exc:
                     raise AdapterError(
-                        f"could not construct the anthropic client: "
+                        f"could not construct the openai client: "
                         f"{type(exc).__name__}: {self._redact(exc)}"
                     ) from exc
             return self._client
 
-    def _extract_text(self, message: Any) -> str:
-        """Flatten the response's text blocks into one string."""
-        blocks = getattr(message, "content", None)
-        if blocks is None:
+    def _extract_text(self, response: Any) -> str:
+        """Pull the first choice's message text out of the response."""
+        choices = getattr(response, "choices", None)
+        if not choices:
             raise AdapterError(
-                f"anthropic response for {self._model_id!r} carried no content field"
+                f"openai-compatible response for {self._model_id!r} carried no choices"
             )
-        parts = [
-            text
-            for block in blocks
-            if isinstance(text := getattr(block, "text", None), str) and text
-        ]
-        if not parts:
+        content = getattr(getattr(choices[0], "message", None), "content", None)
+        if not isinstance(content, str) or not content:
+            finish = getattr(choices[0], "finish_reason", None)
             raise AdapterError(
-                f"anthropic response for {self._model_id!r} contained no text blocks "
-                f"(stop_reason={getattr(message, 'stop_reason', None)!r}). A truncated or "
-                f"tool-only response is missing data, not an empty answer."
+                f"openai-compatible response for {self._model_id!r} contained no message text "
+                f"(finish_reason={finish!r}). A refusal, a truncation or a tool-only reply is "
+                f"missing data, not an empty answer."
             )
-        return "".join(parts)
+        return content
 
     def _redact(self, exc: BaseException) -> str:
         """Strip the key out of provider error text.
@@ -168,6 +184,7 @@ class AnthropicAdapter:
 
     def __repr__(self) -> str:
         return (
-            f"AnthropicAdapter(model_id={self._model_id!r}, max_tokens={self._max_tokens}, "
-            f"temperature={self._temperature}, timeout={self._timeout})"
+            f"OpenAICompatAdapter(model_id={self._model_id!r}, base_url={self._base_url!r}, "
+            f"max_tokens={self._max_tokens}, temperature={self._temperature}, "
+            f"timeout={self._timeout})"
         )

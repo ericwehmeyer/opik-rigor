@@ -1,4 +1,4 @@
-"""Exception hierarchy for rigor.
+"""Exception hierarchy for opik_rigor.
 
 Every failure mode that a caller might reasonably want to catch separately gets
 its own type. Nothing in this library ever converts an error into a quiet
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 class RigorError(Exception):
-    """Base class for every error raised by rigor."""
+    """Base class for every error raised by opik_rigor."""
 
 
 class ModelPinError(RigorError):

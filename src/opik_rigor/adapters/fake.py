@@ -1,4 +1,4 @@
-"""A scripted adapter, so the rest of rigor can be tested without a provider.
+"""A scripted adapter, so the rest of opik_rigor can be tested without a provider.
 
 Every other module in this library -- judges, samplers, the statistical gates --
 is exercised against :class:`FakeAdapter`. That makes its behaviour part of the

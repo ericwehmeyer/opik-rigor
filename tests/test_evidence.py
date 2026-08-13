@@ -1,6 +1,6 @@
 """Tests for the append-only evidence log.
 
-The evidence log is the only place rigor records facts about a model, so these
+The evidence log is the only place opik_rigor records facts about a model, so these
 tests are the argument that the file on disk can be trusted: a fixed envelope,
 no way to rewrite history, no lost records under concurrent writers, and a
 readable log after a crash mid-write.
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from rigor.errors import EvidenceError
-from rigor.evidence import SCHEMA_VERSION, EvidenceLog, EvidenceRecord
+from opik_rigor.errors import EvidenceError
+from opik_rigor.evidence import SCHEMA_VERSION, EvidenceLog, EvidenceRecord
 
 ENVELOPE_KEYS = {"schema_version", "ts", "event_type", "payload"}
 

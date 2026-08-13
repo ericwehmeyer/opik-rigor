@@ -75,7 +75,7 @@ DIGEST_PATTERN = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 def canonical_bytes(payload: Mapping[str, Any]) -> bytes:
     """The exact bytes the digest is taken over.
 
-    Public because the contract is public: anything that wants to verify a rigor
+    Public because the contract is public: anything that wants to verify a opik_rigor
     baseline -- a CI script, another implementation -- needs this function and not
     a prose description of it.
     """
@@ -196,7 +196,7 @@ class Baseline:
 
     @classmethod
     def from_sample(cls, name: str, result: SampleResult, **kwargs: Any) -> Baseline:
-        """Record a :class:`~rigor.sampling.SampleResult` as a baseline.
+        """Record a :class:`~opik_rigor.sampling.SampleResult` as a baseline.
 
         Takes the scores from ``result.scores()`` and the outcomes from
         ``result.outcomes``, and stamps ``created`` now. The timestamp is set here
@@ -220,7 +220,7 @@ class Baseline:
     def load(cls, path: str | os.PathLike[str]) -> Baseline:
         """Read, verify, and return the baseline at ``path``.
 
-        Raises :class:`~rigor.errors.BaselineError` -- naming the file, because a
+        Raises :class:`~opik_rigor.errors.BaselineError` -- naming the file, because a
         suite compares against several -- when the file is missing, is not JSON,
         declares a schema version this code does not implement, carries no digest
         or a malformed one, or does not hash to the digest it carries.
@@ -316,13 +316,13 @@ def _check_schema_version(document: Mapping[str, Any], file: Path) -> None:
     if version > BASELINE_SCHEMA_VERSION:
         raise BaselineError(
             f"baseline file {file} declares schema_version {version}, which is newer "
-            f"than this version of rigor understands ({BASELINE_SCHEMA_VERSION}). "
-            f"Upgrade rigor rather than reading it with the wrong rules"
+            f"than this version of opik_rigor understands ({BASELINE_SCHEMA_VERSION}). "
+            f"Upgrade opik_rigor rather than reading it with the wrong rules"
         )
     if version != BASELINE_SCHEMA_VERSION:
         raise BaselineError(
             f"baseline file {file} declares unknown schema_version {version}; "
-            f"this version of rigor reads schema_version {BASELINE_SCHEMA_VERSION}"
+            f"this version of opik_rigor reads schema_version {BASELINE_SCHEMA_VERSION}"
         )
 
 

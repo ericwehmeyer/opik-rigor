@@ -3,8 +3,8 @@
 The unit suites deliberately test each module against a local double: the judge
 tests script their own adapter, and the adapter tests never construct a judge.
 That keeps them independent, but it leaves one thing unproven -- that the real
-:class:`~rigor.FakeAdapter`, the real :class:`~rigor.PinnedJudge`, and the real
-:class:`~rigor.EvidenceLog` actually fit together. These tests cover that seam,
+:class:`~opik_rigor.FakeAdapter`, the real :class:`~opik_rigor.PinnedJudge`, and the real
+:class:`~opik_rigor.EvidenceLog` actually fit together. These tests cover that seam,
 and the package-level invariants that no single module owns.
 """
 
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-import rigor
-from rigor import (
+import opik_rigor
+from opik_rigor import (
     EvidenceLog,
     FakeAdapter,
     JudgeOutputError,
@@ -28,7 +28,7 @@ from rigor import (
     PinnedJudge,
     RubricDriftError,
 )
-from rigor.evidence import (
+from opik_rigor.evidence import (
     EVENT_JUDGE_INIT,
     EVENT_JUDGE_PARSE_FAILURE,
     EVENT_JUDGE_VERDICT,
@@ -94,7 +94,7 @@ def test_a_default_fake_adapter_is_pinned_enough_for_a_judge(tmp_path: Path) -> 
     # FakeAdapter's default model id has to satisfy the judge's pin rule, or every
     # example in the docs would need a special case.
     judge, _log, _adapter = judge_on(tmp_path, [PASS_RESPONSE])
-    assert rigor.is_pinned(judge.model_id)
+    assert opik_rigor.is_pinned(judge.model_id)
 
 
 def test_an_unpinned_adapter_is_refused_however_it_is_wired(tmp_path: Path) -> None:
@@ -165,13 +165,13 @@ def test_a_provider_outage_propagates_rather_than_scoring_zero(tmp_path: Path) -
     log = EvidenceLog(tmp_path / "evidence.jsonl")
     adapter = FakeAdapter(
         responses=[PASS_RESPONSE, PASS_RESPONSE],
-        fail_with=rigor.AdapterError("provider is down"),
+        fail_with=opik_rigor.AdapterError("provider is down"),
         fail_after=1,
     )
     judge = PinnedJudge(adapter, SHIPPED_RUBRIC, log)
     judge.evaluate("in", "out")
 
-    with pytest.raises(rigor.AdapterError):
+    with pytest.raises(opik_rigor.AdapterError):
         judge.evaluate("in", "out")
 
     # Session 2 note: the sampler owns provider failures, so the judge writes no
@@ -226,14 +226,14 @@ def test_a_seeded_adapter_makes_a_judge_run_reproducible(tmp_path: Path) -> None
 def test_constructing_a_real_adapter_needs_no_provider_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Invariant 3 in PROGRESS.md, stated as a property of rigor rather than of the
+    # Invariant 3 in PROGRESS.md, stated as a property of opik_rigor rather than of the
     # environment: an adapter can be *constructed* without its SDK, because the
     # import is deferred to complete(). The earlier version asserted the SDKs were
     # not installed, which broke as soon as a venv installed opik (which depends on
     # openai) -- it was measuring the venv, not the library.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
 
-    adapter = rigor.AnthropicAdapter("claude-sonnet-4-5-20250929")
+    adapter = opik_rigor.AnthropicAdapter("claude-sonnet-4-5-20250929")
 
     assert adapter.model_id == "claude-sonnet-4-5-20250929"
 
@@ -242,10 +242,16 @@ def test_importing_rigor_in_a_clean_interpreter_pulls_in_no_integrations() -> No
     # Invariant 1: core never imports integrations, and no provider SDK is loaded
     # as a side effect of importing the package. A subprocess is the only honest
     # way to check this -- this test session has already imported half the world.
+    # Match on the top-level module name rather than a string prefix. `startswith`
+    # was fine while the package was called `rigor`, but `opik_rigor` starts with
+    # `opik`, so a prefix test now reports the package itself as a leaked Opik
+    # import. Splitting on the dot asks the question actually intended: which
+    # *distinct* top-level modules got imported?
     code = (
-        "import sys, rigor; "
+        "import sys, opik_rigor; "
         "leaked = sorted(m for m in sys.modules "
-        "if m.startswith(('rigor.integrations', 'anthropic', 'openai', 'opik'))); "
+        "if m.split('.')[0] in ('anthropic', 'openai', 'opik') "
+        "or m.startswith('opik_rigor.integrations')); "
         "print(','.join(leaked))"
     )
     result = subprocess.run(
@@ -255,6 +261,6 @@ def test_importing_rigor_in_a_clean_interpreter_pulls_in_no_integrations() -> No
 
 
 def test_every_public_name_is_importable_from_the_package_root() -> None:
-    missing = [name for name in rigor.__all__ if not hasattr(rigor, name)]
+    missing = [name for name in opik_rigor.__all__ if not hasattr(opik_rigor, name)]
     assert missing == []
-    assert rigor.__version__ == importlib.metadata.version("opik-rigor")
+    assert opik_rigor.__version__ == importlib.metadata.version("opik-rigor")

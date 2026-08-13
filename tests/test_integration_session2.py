@@ -1,7 +1,7 @@
 """The library eating its own cooking.
 
 Everything else in the suite tests one module against a double. This file uses
-rigor the way a caller would: a stochastic judge, sampled n times, gated by the
+opik_rigor the way a caller would: a stochastic judge, sampled n times, gated by the
 statistical assertions, with the whole run recorded in an evidence log and the
 result stored as a hash-verified baseline.
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from rigor import (
+from opik_rigor import (
     Baseline,
     EvidenceLog,
     FakeAdapter,
@@ -34,7 +34,7 @@ from rigor import (
     assert_score_distribution,
     sample,
 )
-from rigor.evidence import EVENT_ASSERTION, EVENT_JUDGE_VERDICT, EVENT_SAMPLE_COMPLETED
+from opik_rigor.evidence import EVENT_ASSERTION, EVENT_JUDGE_VERDICT, EVENT_SAMPLE_COMPLETED
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUBRIC = REPO_ROOT / "rubrics" / "example-rubric.md"

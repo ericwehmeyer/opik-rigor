@@ -5,9 +5,9 @@ Run it::
     python examples/summarise_eval.py --seed 7 --n 40
 
 Nothing here touches the network. The "model under test" is a plain Python
-function and the judge is backed by :class:`rigor.FakeAdapter`, so the whole
+function and the judge is backed by :class:`opik_rigor.FakeAdapter`, so the whole
 story below is reproducible byte for byte from the seed -- which is the same
-discipline rigor asks of a real suite, for the same reason: a gate you cannot
+discipline opik_rigor asks of a real suite, for the same reason: a gate you cannot
 reproduce is a gate you cannot argue with.
 
 The story it tells, in order:
@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from rigor import (
+from opik_rigor import (
     Baseline,
     EvidenceLog,
     FakeAdapter,
@@ -258,7 +258,7 @@ def classify(summary: str) -> str:
     raise ValueError(f"summary matches no document in the corpus: {summary!r}")
 
 
-#: Delimiters from rigor's own judge prompt. The fake needs only the part of the
+#: Delimiters from opik_rigor's own judge prompt. The fake needs only the part of the
 #: prompt under evaluation -- the source document is quoted higher up, and every
 #: caveat appears there whether or not the summary kept it.
 OUTPUT_OPEN = "=== MODEL OUTPUT UNDER EVALUATION ==="
@@ -385,7 +385,7 @@ def print_header(args: argparse.Namespace, judge: PinnedJudge, log: EvidenceLog)
     show("evidence log", log.path)
     print()
     paragraph(
-        "The judge is pinned to one model id and one rubric revision. Change either and rigor "
+        "The judge is pinned to one model id and one rubric revision. Change either and opik_rigor "
         "raises rather than quietly comparing scores across two different instruments -- which "
         "is what the hash above is for."
     )
@@ -480,7 +480,7 @@ def summarise_payload(event_type: str, payload: Any) -> str:
 #: somewhere obvious instead of in whatever project the machine happens to have
 #: configured -- and so that Opik's "no project name configured" warning is not
 #: the first thing a reader sees.
-OPIK_PROJECT = "rigor-example"
+OPIK_PROJECT = "opik_rigor-example"
 
 OPIK_HELP = """\
 Everything above is finished and unaffected. Sending the same run to Opik needs
@@ -518,19 +518,19 @@ def log_to_opik(
     """Best-effort mirror of the run into Opik. Never fails the script.
 
     The import is inside this function on purpose, and so is every call: with
-    ``--opik`` off -- the default -- ``rigor.integrations.opik`` is never
+    ``--opik`` off -- the default -- ``opik_rigor.integrations.opik`` is never
     touched, so the example runs on an install that has neither the ``opik``
     package nor a server to talk to.
     """
     rule("8. mirroring the run into Opik (--opik)")
     paragraph(
         "This is the only part of the script that leaves the process. It is also the only "
-        "part allowed to fail without failing the run: rigor's core never imports an "
+        "part allowed to fail without failing the run: opik_rigor's core never imports an "
         "integration, so a dashboard that is down costs you a dashboard, not a test suite."
     )
     print()
     try:
-        from rigor.integrations import opik as opik_integration
+        from opik_rigor.integrations import opik as opik_integration
     except Exception as exc:  # noqa: BLE001 - a missing optional integration is not a failure
         explain_opik(f"{type(exc).__name__}: {exc}")
         return
@@ -558,8 +558,9 @@ def log_to_opik(
     paragraph(
         "Handed to, not confirmed delivered. Opik's client batches in a background thread and "
         "does not raise when the destination is unreachable, so the trace id above is proof "
-        "that rigor built the trace, not that a server accepted it. If OPIK: warnings appeared "
-        "on stderr, or the trace is not in your project, that is the write failing quietly -- "
+        "that opik_rigor built the trace, not that a server accepted it. If OPIK: warnings "
+        "appeared on stderr, or the trace is not in your project, that is the write failing "
+        "quietly -- "
         "which is exactly why the gates above do not depend on it."
     )
 
@@ -572,7 +573,7 @@ def log_to_opik(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate a deliberately imperfect summariser with rigor: pinned judge, "
+            "Evaluate a deliberately imperfect summariser with opik_rigor: pinned judge, "
             "sampled n times, gated statistically, recorded as evidence. Offline by default."
         )
     )
@@ -624,7 +625,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     judge = PinnedJudge(adapter, RUBRIC, log, name="summariser")
 
-    print("rigor -- an end-to-end summarisation eval, entirely offline")
+    print("opik_rigor -- an end-to-end summarisation eval, entirely offline")
     print_header(args, judge, log)
     print_system_under_test()
 
