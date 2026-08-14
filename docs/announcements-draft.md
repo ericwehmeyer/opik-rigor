@@ -4,9 +4,23 @@ Drafts only. Nothing here has been posted anywhere. Edit freely before use.
 
 ---
 
-## 1. Opik GitHub Discussions post
+## 1. Opik post — ON HOLD, no venue
 
-**Title:** Statistical gates and judge pinning on top of Opik
+**Checked 2026-08-13: `comet-ml/opik` has GitHub Discussions disabled.** Its
+`CONTRIBUTING.md` names no Slack, Discord, or forum, and says nothing about
+sharing third-party tools built on Opik. Issues are open (196 of them, 21.4k
+stars), but announcing your own project there is off-topic by default.
+
+This draft was written for a venue that was never verified to exist — the same
+mistake as the retracted documentation claim in `COMPATIBILITY.md`: asserting
+something about another project's setup without checking it.
+
+Held rather than deleted, because the text is still good and a venue may appear.
+If one is wanted sooner, the honest route is a real contribution — an integration
+docs PR — not an announcement. Meanwhile the package is discoverable on PyPI
+under the `opik` keyword, and its README links back.
+
+**Title (if a venue appears):** Statistical gates and judge pinning on top of Opik
 
 I have been using Opik for tracing and evaluation, and built a small library for
 two problems adjacent to it. A test asserting `pass_rate >= 0.9` over 20 runs
