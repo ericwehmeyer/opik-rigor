@@ -118,7 +118,9 @@ Also fixed after the v0.1.0 tag:
 - The Opik integration was verified against opik 2.2.28 only; the extra declares
   `opik>=2.0,<3` on the reasoning recorded in
   [COMPATIBILITY.md](COMPATIBILITY.md), which also records an upstream
-  introspection bug in 2.2.28 and four points where the published Opik docs are
-  wrong.
+  introspection bug in 2.2.28, one stale documentation URL, and a retraction of
+  this project's own earlier claim that Opik's SDK reference rendered parameter
+  names wrongly. It did not; the fault was in the HTML-to-markdown converter used
+  to read it.
 
 [0.1.0]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.1.0
