@@ -8,6 +8,28 @@ you can run inside a corporate network and one you cannot.
 
 As with the Anthropic adapter there is no default ``model_id``: a default would
 re-point under you, and a score recorded against a moving target is not evidence.
+
+Sampling parameters
+-------------------
+
+``temperature`` still defaults to ``0.0`` here, and ``temperature=None`` omits the
+key from the request. The asymmetry with :mod:`opik_rigor.adapters.anthropic`,
+where the default *had* to become "omit", is deliberate and worth stating.
+
+Anthropic's default moved because the old one is a guaranteed 400 on every model
+Anthropic currently serves -- there was no configuration a caller could supply
+that worked. Nothing forces the same move here: ``0.0`` is still accepted by the
+endpoints this adapter is aimed at, and dropping it by default would quietly
+cost determinism everywhere it does work, in exchange for nothing.
+
+What this adapter did lack was the *escape hatch*: some newer reasoning-style
+deployments accept only their own default sampling values, and there was no way
+to construct this adapter without sending one. ``None`` is that hatch. There is
+deliberately **no table of which deployments those are**, for two reasons: this
+project has not verified any such list against the vendor's documentation (and
+does not publish vendor facts it has not checked -- see ``COMPATIBILITY.md``),
+and ``model_id`` here is whatever name a gateway, vLLM server or Azure deployment
+happens to use, so a table keyed on it would be guessing twice.
 """
 
 from __future__ import annotations
@@ -43,7 +65,11 @@ class OpenAICompatAdapter:
             changing.
         max_tokens: Cap on the response length.
         temperature: Defaults to ``0.0`` -- a judge that is asked the same
-            question twice should answer it the same way.
+            question twice should answer it the same way. Pass ``None`` to omit
+            the parameter from the request entirely, which is what a deployment
+            that accepts only its own default sampling values needs. See the
+            module docstring for why this default did not move when the
+            Anthropic adapter's did.
         timeout: Per-request timeout in seconds, handed to the SDK.
 
     Raises:
@@ -57,7 +83,7 @@ class OpenAICompatAdapter:
         *,
         base_url: str | None = None,
         max_tokens: int = 1024,
-        temperature: float = 0.0,
+        temperature: float | None = 0.0,
         timeout: float = 60.0,
         **forbidden: object,
     ) -> None:
@@ -69,8 +95,14 @@ class OpenAICompatAdapter:
             raise ValueError(f"base_url must be a non-empty string or None, got {base_url!r}")
         if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 1:
             raise ValueError(f"max_tokens must be a positive int, got {max_tokens!r}")
-        if not 0.0 <= float(temperature) <= 2.0:
-            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature!r}")
+        if temperature is not None:
+            if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+                raise TypeError(
+                    f"temperature must be a float or None, got {temperature!r}. "
+                    f"None means the parameter is omitted from the request."
+                )
+            if not 0.0 <= float(temperature) <= 2.0:
+                raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature!r}")
         if float(timeout) <= 0:
             raise ValueError(f"timeout must be > 0 seconds, got {timeout!r}")
 
@@ -78,7 +110,7 @@ class OpenAICompatAdapter:
         resolved = base_url if base_url is not None else os.environ.get(ENV_OPENAI_BASE_URL, "")
         self._base_url = resolved.strip() or None
         self._max_tokens = max_tokens
-        self._temperature = float(temperature)
+        self._temperature = None if temperature is None else float(temperature)
         self._timeout = float(timeout)
         # Private, and deliberately absent from __repr__ and from every message
         # this module raises. See _redact.
@@ -100,7 +132,8 @@ class OpenAICompatAdapter:
         return self._max_tokens
 
     @property
-    def temperature(self) -> float:
+    def temperature(self) -> float | None:
+        """The value that will be sent, or ``None`` if no such key is sent."""
         return self._temperature
 
     @property
@@ -111,13 +144,18 @@ class OpenAICompatAdapter:
         if not isinstance(prompt, str):
             raise TypeError(f"prompt must be a string, got {type(prompt).__name__}")
         client = self._sdk_client()
+        # Built as a dict rather than passed as keywords so that "omitted" means
+        # the key is absent -- ``temperature=None`` on the wire is a sent
+        # parameter, not an unsent one.
+        request: dict[str, Any] = {
+            "model": self._model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": self._max_tokens,
+        }
+        if self._temperature is not None:
+            request["temperature"] = self._temperature
         try:
-            response = client.chat.completions.create(
-                model=self._model_id,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
-            )
+            response = client.chat.completions.create(**request)
         except Exception as exc:  # provider SDKs raise their own hierarchy
             raise AdapterError(
                 f"openai-compatible call failed for model {self._model_id!r} at "

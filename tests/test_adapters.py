@@ -255,17 +255,25 @@ def test_model_id_is_required_and_positional(anthropic_env: str) -> None:
         AnthropicAdapter()  # type: ignore[call-arg]
 
 
-def test_defaults_are_deterministic_and_readable(anthropic_env: str, openai_env: str) -> None:
+def test_defaults_are_readable(anthropic_env: str, openai_env: str) -> None:
     anthropic = AnthropicAdapter(ANTHROPIC_MODEL)
     compat = OpenAICompatAdapter(OPENAI_MODEL)
 
     for adapter in (anthropic, compat):
-        assert adapter.temperature == 0.0  # a judge must answer the same way twice
         assert adapter.max_tokens == 1024
         assert adapter.timeout == 60.0
     assert anthropic.model_id == ANTHROPIC_MODEL
     assert compat.model_id == OPENAI_MODEL
     assert compat.base_url is None
+
+    # The two temperature defaults differ, and the difference is the subject of
+    # tests/test_adapter_sampling_params.py -- read the table there before
+    # changing either. In short: Anthropic removed the parameter from every model
+    # it currently serves, so a default of 0.0 was a guaranteed 400 and the
+    # default had to become "send no such key"; an OpenAI-protocol endpoint still
+    # takes 0.0, so dropping it there would cost determinism and buy nothing.
+    assert anthropic.temperature is None
+    assert compat.temperature == 0.0  # a judge must answer the same way twice
 
 
 @pytest.mark.parametrize(
@@ -345,8 +353,9 @@ def test_anthropic_response_text_blocks_are_joined(
     assert adapter.complete("hi") == "hello world"
     assert captured["model"] == ANTHROPIC_MODEL
     assert captured["max_tokens"] == 32
-    assert captured["temperature"] == 0.0
     assert captured["messages"] == [{"role": "user", "content": "hi"}]
+    # No temperature key by default -- see tests/test_adapter_sampling_params.py.
+    assert "temperature" not in captured
 
 
 def test_anthropic_tool_only_response_is_an_error_not_an_empty_string(
