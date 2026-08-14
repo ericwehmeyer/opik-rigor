@@ -133,6 +133,36 @@ so Session 4's roadmap section is written from evidence rather than imagination.
 Counterweight, equally worth recording: the failure messages needed no framing at
 all. The two best screens in the example are copy-pasted library prose.
 
+## Caller friction, found by the first external consumer
+
+`migration-kit` (`C:\Users\ewehm\repos\migration-kit`) consumes the **published**
+0.1.0 wheel from PyPI, not this working copy, which is the only way it counts as a
+consumer. Its Session 1 runner turned up two more roadmap items. Both are recorded
+here rather than worked around in the caller, per the dependency-direction rule.
+
+8. **`sample` records a classifier failure in the same field as a call failure,
+   and the default classifier fails on the most common return type there is.**
+   `default_outcome` raises `TypeError` on a plain `str` — reasonably, since it
+   cannot know whether `"Paris"` is a pass — but that exception lands on
+   `Run.error`, exactly where an exception raised by `fn` lands. A caller who only
+   wants the text back, and has no pass/fail question yet, therefore gets `n` runs
+   that each carry `value="Paris"` *and* an error. migration-kit's first end-to-end
+   run reported 6 completions and 6 provider failures against a `FakeAdapter` that
+   answered every prompt correctly. The fix in the caller is one explicit
+   `outcome=`, so this is friction rather than a defect — but the failure mode is
+   silent in the direction that matters: it makes a model look like it answered
+   nothing. Options: let `outcome=None` mean "do not classify" and leave
+   `Run.outcome` as `None` without an error, or keep classifier errors in a
+   separate field from call errors so the two are never confused.
+9. **The `Adapter` seam exposes no usage data.** `complete(prompt) -> str` is the
+   whole protocol, so a caller that wants token counts — for a cost gate, or for
+   the "what did this verdict cost" line in a report — cannot get them without
+   reaching past the seam into a provider SDK. migration-kit's `Completion` carries
+   `tokens_in`/`tokens_out` fields that it must leave `None` for every adapter rigor
+   ships. An optional second method (`complete_with_usage`, or a `last_usage`
+   property) would keep the one-method protocol intact for adapters that cannot
+   report it.
+
 ## Decisions made, and why
 
 **The pin rule lives in one module.** `pinning.py` is the single definition of
