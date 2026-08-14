@@ -98,10 +98,22 @@ opposite things, is exactly the kind of thing to read twice.
 after a week of wasted compute:
 
 ```
-judge 'summariser' refuses unpinned model id 'claude-3-5-sonnet-latest'. It must
-end in a concrete version marker ... An alias re-points over time, which silently
-invalidates every score recorded against it.
+judge 'summariser' refuses unpinned model id 'claude-3-5-sonnet-latest'. It contains
+the alias token 'latest', which names whatever the provider is serving today rather
+than one fixed version. A pinned id names one immutable model version ... An alias
+re-points over time, which silently invalidates every score recorded against it.
 ```
+
+An id is pinned when it carries no alias token (`latest`, `newest`, `current`,
+`stable`, `default`) and ends in a release designator — a release number
+(`claude-opus-5`, `claude-opus-4-8`), a date stamp (`claude-haiku-4-5-20251001`,
+`gpt-4o-2024-08-06`), or an explicit version (`-v1`, `-2.1.0`). The property being
+checked is *immutability*, not spelling: a retired id that still names one fixed
+set of weights is pinned, and an id ending in a *word* (`gpt-4o`, `mistral-large`)
+is not, because a word names a kind of model and kinds get re-pointed. What no
+string can tell you is a provider's policy, so the one place that needs vendor
+knowledge — providers that publish `<family>-<number>` as a moving pointer — is a
+single documented table in `pinning.py`, and its limits are written down there.
 
 It hashes its rubric and raises when the rubric changes underneath a baseline
 (`accept_rubric_change=True` acknowledges it and records both hashes). And it
@@ -131,14 +143,22 @@ text under a claim of verbatim, and it is gone.
 pip install opik-rigor
 ```
 
-**What that costs.** Measured with
+**What that pulls in.** opik-rigor's own code is 0.33 MB. It requires NumPy and
+SciPy, which come to **180.6 MB on disk** between them (numpy 2.5.2 and scipy
+1.18.0 on CPython 3.14/Windows, counting the `numpy.libs` and `scipy.libs`
+directories that carry the bundled BLAS/LAPACK). NumPy is used by every gate.
+SciPy is used by exactly one function — `assert_no_regression`, for
+`scipy.stats.mannwhitneyu` — and is imported on first call rather than at package
+import, so a suite that never calls that gate never loads SciPy and does not pay
+for it at import time. Both stay required, so `pip install opik-rigor` continues
+to give you a working `assert_no_regression`.
+
+**What that costs you at the prompt**, which is the number you feel: measured with
 `pip install --no-cache-dir opik-rigor` into an empty virtualenv (Python 3.14.4,
-Windows): **54 seconds**, and the virtualenv grows from **11.5 MiB to 192.8 MiB**.
-Four packages. Almost all of the weight is scipy (109.6 MiB, plus 19.3 MiB of
-bundled shared libraries) and numpy (31.2 MiB, plus 20.1 MiB); rigor's own code is
-0.4 MiB. The Wilson bound and the Mann-Whitney test are scipy's, and that is the
-bill for not hand-rolling them. The `[opik]` extra costs a great deal more — see
-[Optional extras](#optional-extras) before you add it.
+Windows), **54 seconds**, and the virtualenv grows from **11.5 MiB to 192.8 MiB**
+across four packages. That is the disk figure above plus the interpreter's own
+baseline; nothing else is hiding in it. The `[opik]` extra costs a great deal
+more — see [Optional extras](#optional-extras) before you add it.
 
 A worked example rubric ships **inside the package**, so the install gives you
 something to point the judge at:
@@ -205,8 +225,9 @@ of output with no way to produce it. The full key set on success is `gate`,
 `label`, `passed`, `n`, `successes`, `failures`, `pass_rate`, `lower_bound`,
 `interval_lower`, `interval_upper`, `min_rate`, `confidence`, `method`.
 
-And the other primitive. Append one sentence to `rubric.md`, then build the same
-judge against the same evidence log:
+And the other primitive. Append the line `Be stricter about caveats.` to
+`rubric.md` — the exact text matters, because the second hash below is a hash of
+the result — then build the same judge against the same evidence log:
 
 ```python
 judge = PinnedJudge(adapter, "rubric.md", log, name="summariser")
@@ -215,14 +236,15 @@ judge = PinnedJudge(adapter, "rubric.md", log, name="summariser")
 ```
 opik_rigor.errors.RubricDriftError: rubric drift for judge 'summariser': evidence log
 last recorded 556c1383350d73d71235e40c719cdf816bec8a5693cc4750ad01ae421128dc5d, rubric
-file now hashes to 7fec47c979db2382b0db137c54af2b361b1cd0d42e1067d5fc43c0d7a6b6c7d5.
+file now hashes to 833331e342e2a6c05c4759621fde7b606fbb4a22dfadf283c35ca9d5176138c8.
 Scores before and after this change are not comparable. Pass
 accept_rubric_change=True to acknowledge and record the change.
 ```
 
-The first hash is the rubric that ships in the wheel; the second is that file with
-one line added. Both are printed in full, because half a hash is not something you
-can compare against a log — the message never abbreviates one.
+The first hash is the rubric exactly as it ships in the wheel; the second is that
+file with the line above appended. Both are printed in full, because half a hash
+is not something you can compare against a log — the message never abbreviates
+one, and an earlier revision of this README showed `...` in the middle of both.
 
 A full worked example — corpus, judge, both gates, a baseline, a simulated
 regression, and the audit trail — **ships inside the wheel** and runs offline with
@@ -283,11 +305,10 @@ install.** Measured the same way as the core install above, into its own empty
 virtualenv: `pip install --no-cache-dir "opik-rigor[opik]"` takes **4 minutes 48
 seconds** and produces a **414.9 MiB** virtualenv holding **74 packages**, against
 54 seconds, 192.8 MiB and 4 packages for the bare install. What arrives with it
-includes litellm (101.9 MiB), openai,
-tokenizers, huggingface-hub, hf-xet, tiktoken, sentry-sdk, three `tree-sitter`
-grammars, pydantic, boto3 type stubs — and pytest, which Opik pulls in for its own
-plugin. Add the extra when you want the dashboard; do not add it because the
-sentence above made it sound small.
+includes litellm (101.9 MiB), openai, tokenizers, huggingface-hub, hf-xet,
+tiktoken, sentry-sdk, three `tree-sitter` grammars, pydantic, boto3 type stubs —
+and pytest, which Opik pulls in for its own plugin. Add the extra when you want
+the dashboard; do not add it because the sentence above made it sound small.
 
 **pytest** — `@pytest.mark.rigor_repeat(n=50, min_rate=0.9)` runs a test *n* times
 and applies the gate to the outcomes. A body that returns passes; one that raises

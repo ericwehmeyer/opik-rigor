@@ -290,7 +290,7 @@ Item 9 (no token usage on the `Adapter` seam) is likewise still open, for the sa
 reason: adding `complete_with_usage` to the protocol is additive for adapters but
 not for code that type-checks against `Adapter`.
 
-### 16. `is_pinned` rejects every current frontier Anthropic model id
+### 16. `is_pinned` rejects every current frontier Anthropic model id — **RESOLVED**
 
 Found on 2026-08-13, hours after 0.1.1 shipped, by an agent designing a *third*
 consumer — not by reading this repository. Verified against the published 0.1.1
@@ -320,16 +320,227 @@ implementation encodes a *proxy* for it — "has a date in the name" — and the
 has stopped tracking the thing it stood for. A vendor changed its naming
 convention and rigor's gate started measuring spelling instead of stability.
 
-The fix is not simply to widen the regex, and that is why this is not a one-liner:
-`claude-opus-5` genuinely *is* an alias that can be re-pointed, so accepting it
-would make `is_pinned` a lie in the other direction. The honest options are a
-per-provider rule set, an explicit allow-list the caller supplies, or separating
-"syntactically pinned" from "the caller asserts this is pinned" so the assertion is
-recorded in the evidence log rather than inferred from a string. Each changes what
-a recorded pin *means*, so this waits for **0.2** alongside items 8 and 9.
+The fix is not simply to widen the regex, and that is why this was not a one-liner:
+whether an id re-points is a provider *policy*, and `claude-opus-5` and `gpt-5` are
+the same shape with opposite answers, so no vendor-neutral rule can separate them.
 
-Until then, the workaround is to not call `require_pinned` on Anthropic ids, which
-is a bad workaround and is stated here so nobody rediscovers it at midnight.
+**Resolved.** The rule now checks immutability directly instead of checking for a
+date, in three clauses. (1) No alias token — `latest`, `newest`, `current`,
+`stable`, `default`; this half was always the load-bearing one and is unchanged.
+(2) The id must end in a *release designator*: splitting on `-`, `_`, `@`, `:`, the
+last component must be nothing but a version (`5`, `8`, `20251001`, `06`, `v1`,
+`2.1.0`). A last component that is a *word* — `sonnet`, `mini`, `4o`, `large`,
+`instruct` — names a kind of model, and a kind is exactly what a provider
+re-points at new weights. (3) One documented table, `_MOVING_FAMILIES`, for
+providers that publish `<family>-<number>` as a moving pointer; today that is
+OpenAI only, and it is the reason `gpt-5` and `gpt-4.1` are refused while
+`claude-opus-5` is accepted.
+
+The relaxation was checked in both directions, because a fix that makes everything
+pass is the removal of the check rather than a repair of it. Every current
+Anthropic id is accepted; `claude-3-5-sonnet-latest`, bare `gpt-4o`, `claude`,
+`my-finetune`, `mistral-large`, the empty string and non-strings are still refused;
+and `gpt-4.1`, which **0.1.1 wrongly accepted** as pinned (its `4.1` satisfied the
+old dotted-version branch), is now correctly refused. That last one was found by
+running the hand-derived verdict table against the shipped predicate and is a
+second, previously unrecorded defect in the same function.
+
+Two things the new rule deliberately does not do, both written into the module
+docstring so the next person meets them before a consumer does. It **accepts** a
+moving `<family>-<number>` pointer from a provider not yet in the table — the same
+class of failure as the defect it replaces, now costed at one line in a table
+rather than a rewrite. And it **refuses** a self-hosted id ending in a word even
+when its weights never move; the fix is a `-v1` suffix, and the asymmetry is
+chosen, because a false refusal is loud and a false acceptance silently
+invalidates every score recorded after it.
+
+Two things it does not *mean*, also stated in the docstring: pinned is not
+*available* (`claude-3-7-sonnet-20250219` is retired and still names one immutable
+version, which is what a score recorded against it in 2025 needs), and pinned is
+not *correct* (nothing here checks that a model exists).
+
+This is **additive under the compatibility rule**: no signature changed, no name
+was renamed, and no id that 0.1.1 accepted is now refused *except* `gpt-4.1`, which
+0.1.1 should not have accepted. Ids that were refused and are now accepted cannot
+break a caller, because the only thing `require_pinned` did with them was raise.
+The rejection *message* changed, which is the same kind of change 0.1.1 shipped
+additively as the *message* half of item 8.
+
+### 17. `import opik_rigor` costs a second, for a gate most suites never call
+
+Found on 2026-08-14 by measuring the published 0.1.1 install rather than by reading
+the tree — the friction is invisible in source, because the import that causes it is
+one perfectly ordinary line. `src/opik_rigor/distribution.py:33` imported
+`from scipy.stats import mannwhitneyu, norm` at module scope, and `__init__.py`
+imports from that module, so `import opik_rigor` pulled in all of `scipy.stats` —
+which drags `scipy.optimize`, `scipy.spatial`, `scipy.sparse` and `scipy.linalg`
+behind it.
+
+The cost is paid by every suite that imports the package, including the
+overwhelming majority that only ever call `assert_pass_rate`. It is worse than a
+one-off: this library registers a `pytest11` entry point, so the import happens at
+*collection*, before a single test runs, on every pytest invocation in a project
+that has it installed — including invocations of test files that never touch it.
+A consumer running the gate in a pre-commit hook pays it on every commit.
+
+**What the fix is not, and this is the whole point.** `mannwhitneyu` has exactly
+one call site, so deferring the scipy import into `assert_no_regression` looks like
+the whole answer. It is not. `norm.ppf` has three call sites — `wilson_lower_bound`,
+`wilson_interval` and `_runs_needed` — and the first of those sits directly on the
+pass-rate path, the most-used gate in the package. A lazy import that the first gate
+call immediately triggers is not a lazy import.
+
+That is measurable rather than arguable. Three trees were timed **interleaved**, so
+background load hit all three equally — `BEFORE` (main @ `df93f43`), `LAZY-ONLY`
+(both scipy names deferred into functions, but the Wilson z still `norm.ppf`), and
+`AFTER` (this branch). Warm, minimum of 20 runs, milliseconds:
+
+```
+scenario                              BEFORE   LAZY-ONLY      AFTER
+interpreter floor                       36.6        39.3       45.3
+import opik_rigor                     1018.6       213.4      247.2
+import + assert_pass_rate             1070.6      1096.7      251.0
+import + assert_score_distribution    1320.5       248.6      247.9
+import + assert_no_regression         1143.8      1048.1     1023.2
+```
+
+Read the `LAZY-ONLY` column downward. Its bare import is fast — 213.4 ms, the fix
+apparently working — and then `assert_pass_rate` costs **1096.7 ms**, no better than
+the 1070.6 ms it was trying to improve on, because the gate imports the scipy the
+module just finished not importing. `assert_score_distribution`, which never touches
+`norm.ppf`, *is* genuinely fixed at 248.6 ms. So the half-fix does not merely
+under-deliver; it moves the cost from a place you would measure to a place you would
+not, and leaves the single most-called gate exactly where it was.
+
+**The fix, and it is additive.** `statistics.NormalDist().inv_cdf` is CPython's
+implementation of Wichura's AS241, in the standard library since 3.8; this package
+already requires >= 3.10. Replacing `norm.ppf` with it *and* moving `mannwhitneyu`
+inside `assert_no_regression` takes warm import from 1018.6 ms to 247.2 ms against a
+~40 ms interpreter floor, and — the part that matters — takes `assert_pass_rate`
+from 1070.6 ms to 251.0 ms. The absolute figures move with machine load; the columns
+above were measured against each other in one interleaved run for exactly that
+reason. `assert_no_regression` is unchanged (1143.8 → 1023.2 ms, a difference inside
+the run-to-run spread): it still pays the full SciPy import on first call, which is
+the one caller that should.
+Nothing is renamed, no signature rejects a call it used to accept, and no gate's
+verdict moves — the equivalence evidence is in CHANGELOG.md and in
+`tests/test_import_cost.py`. **So this does not wait for 0.2, and it shipped
+additively.**
+
+**Two adjacent changes do wait for 0.2, and the ordering matters.** The obvious
+next moves are an `opik-rigor[regression]` extra that takes SciPy out of the base
+install, and dropping NumPy so the base install is stdlib-only. Both are runtime
+breaks: `pip install opik-rigor` followed by `assert_no_regression` would raise
+where it used to work, and this project's convention — written down before 0.1.1
+shipped, and relied on by a consumer pinned `>=0.1.0,<0.2` — is that `0.MINOR`
+means breaking. The ordering matters in the other direction too: item 17 had to
+land *first*, and additively, because it is what makes the extra worth having.
+Without it, `opik-rigor[regression]` would remove a dependency the base install
+still imports at module scope, which is not a smaller install but a broken one.
+Deferring the import is the prerequisite; moving the dependency is the follow-on.
+Do them in that order, one release apart, and no consumer is ever caught between.
+
+### 18. NumPy is imported and never declared
+
+Found the same day, by reading `pyproject.toml` next to the file that imports.
+`dependencies` listed only `scipy>=1.10`, while `distribution.py:32` imported
+`numpy as np` at module scope and used it in `_coerce_pass_data`, `_coerce_scores`
+and every score summary. The public docstring around `distribution.py:604-608`
+goes further and pins the reported statistics to NumPy's exact semantics: **mean**
+is `numpy.mean`, **p10** is `numpy.percentile` with NumPy's default *linear*
+interpolation, **stddev** is `numpy.std(ddof=1)`. That is a documented promise
+about a library the package never said it needed.
+
+It worked only because SciPy requires NumPy transitively. That is an accident, not
+a contract — and it is exactly the accident item 17's follow-on destroys: the day
+SciPy moves behind an extra, a base install has no NumPy, and `import opik_rigor`
+fails on a line nobody changed. **Declaring it is additive and shipped with item
+17** (`numpy>=1.21`, where the current scalar type names and `numpy.typing`
+surface settled; `scipy>=1.10` already requires `>=1.19.5`, so no existing
+environment is excluded). `tests/test_import_cost.py` asserts the declaration is
+there, and asserts SciPy is absent from every extra, so the 0.2 change has to be
+deliberate.
+
+**Removing NumPy is the part that waits for 0.2**, and it waits on test debt
+rather than on the calendar. A prototype that replaced it with `statistics` and
+`math` passed the entire suite and still silently broke `np.bool_`, `np.integer`
+and `np.float32` acceptance in `_coerce_pass_data` and `_coerce_scores` — inputs
+that arrive routinely from array code and CSV round-trips, and that **no test
+covers**. Until those coercion paths have tests that would notice, dropping NumPy
+is a change whose regression nothing in this repository can catch, which is the
+one kind of change this project does not make.
+
+### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model
+
+Found on 2026-08-14 by a coordinating agent reading Anthropic's own migration
+reference against `src/opik_rigor/adapters/anthropic.py`, and confirmed here by
+reading the call shape rather than by spending a credential. The adapter passes
+`temperature` on every request:
+
+```python
+# src/opik_rigor/adapters/anthropic.py:96-101
+message = client.messages.create(
+    model=self._model_id,
+    max_tokens=self._max_tokens,
+    temperature=self._temperature,          # constructor default 0.0, line 50
+    messages=[{"role": "user", "content": prompt}],
+)
+```
+
+`temperature`, `top_p` and `top_k` were **removed** on Claude Opus 5, Opus 4.8,
+Opus 4.7, Sonnet 5 and Fable 5: sending any of them returns a **400**. On Sonnet 5
+the rule is narrower — a *non-default* value returns 400 — and the API default is
+`1.0`, so this adapter's `0.0` is non-default and 400s there too. There is no
+configuration a caller can supply that avoids it: `temperature` has no sentinel
+meaning "omit", the constructor validates `0.0 <= temperature <= 1.0` and so
+rejects `None`, and the parameter is passed unconditionally. **Every call this
+adapter makes to a current Anthropic model fails at the API boundary.** It fails
+loudly at least — `complete()` wraps provider exceptions, so the caller sees
+`AdapterError: anthropic call failed for model 'claude-opus-5': BadRequestError:
+...` rather than a wrong answer — but it fails on every call.
+
+**This is worse than item 16 was, and until item 16 was fixed the two compounded.**
+Item 16 was a gate that *refused to start* with a current model id; a consumer
+could route around it by not calling `require_pinned`, which was a bad workaround
+but was a workaround. This one is at the API call itself, so routing around the
+gate buys a 400 instead of a judgement. Item 16 was the front door being locked;
+item 19 is there being no room behind it. **Item 16 is now fixed and this one is
+not**, which means the door opens onto the 400: `PinnedJudge(AnthropicAdapter(
+"claude-opus-5"), ...)` now constructs and then fails on its first `complete()`.
+That is a better failure than the previous one — it is at the call, with a message
+naming the model and the provider's own error — but rigor still cannot judge with
+anything Anthropic currently serves until this item lands.
+
+**Why this is recorded rather than implemented.** The obvious fix — omit
+`temperature` when the model id looks current — is a runtime behaviour change on a
+published adapter, and it is not purely internal: the constructor validates the
+range and the class exposes a `temperature` property, both of which are public
+surface a consumer may read. The honest options:
+
+* **Omit when unset, honour when set** — give `temperature` a `None` default
+  meaning "do not send", keep the validation for explicitly-passed values, and
+  keep the property (returning `None`). This is *additive*: no existing call is
+  rejected, and a caller who passed `0.0` explicitly against an older model keeps
+  getting `0.0`. It changes the default's behaviour, which is the part that needs
+  argument — but the current default's behaviour is a 400, so nothing that works
+  today stops working.
+* **Per-model parameter rules** — a table of which models accept which sampling
+  parameters, so the adapter sends what the target actually supports. Correct, and
+  it acquires the same maintenance problem item 16 had: a vendor changes its
+  surface and the table silently stops tracking it. Item 16's fix is the precedent
+  for how to hold that honestly rather than avoid it — `_MOVING_FAMILIES` in
+  `pinning.py` is one table, commented as needing updates, with the gap it leaves
+  written into the module docstring instead of discovered by a consumer. A table
+  whose staleness is documented and localised is a different thing from a rule
+  that has silently stopped tracking reality, which is what item 16 was.
+* **Drop the parameter entirely** — smallest code, and it removes a public
+  property and a constructor keyword. That is breaking, and waits for 0.2.
+
+The first option looks additive enough to ship before 0.2, and is the recommended
+one; it needs a test that asserts the key is *absent* from the request payload,
+not merely that the call succeeds. Deciding between it and the per-model table is
+the open question, and it is deliberately left open here rather than settled in a
+branch whose subject is import cost.
 
 ## Phase 3 — closing the recorded gaps
 
@@ -511,18 +722,23 @@ checkout cannot answer instead):
 
 | command | result |
 |---|---|
-| `.venv\Scripts\python.exe -m pytest` | **691 passed, 11 skipped, 3 xfailed** |
-| `.venv\Scripts\python.exe -m pytest tests examples` | **710 passed, 11 skipped, 3 xfailed** |
+| `.venv\Scripts\python.exe -m pytest` | **959 passed, 11 skipped, 1 xfailed** |
+| `.venv\Scripts\python.exe -m pytest tests examples` | **978 passed, 11 skipped, 1 xfailed** |
 | `.venv\Scripts\python.exe -m ruff check src tests scripts examples` | clean |
 | `.venv\Scripts\python.exe scripts\verify_release.py` | **16 passed, 0 failed, 0 skipped** |
+
+Measured after merging `main`, which landed the pinning rewrite, the import-cost
+work and the property-based suites in the same window; before that merge the same
+two commands on this branch reported 691 and 710. Both numbers are recorded
+because a reader comparing against either has to know which tree it was.
 
 `pytest` alone still honours `testpaths = ["tests"]` and therefore collects 19
 fewer than `pytest tests examples`; both numbers are above so neither can be read
 as a regression against the other.
 
 **The `.venv-opik` row is deliberately absent, and that is itself a finding.**
-`.venv-opik\Scripts\python.exe -m pytest tests examples` reports 712 passed, 8
-skipped, 3 xfailed and **1 failed** —
+`.venv-opik\Scripts\python.exe -m pytest tests examples` reports 976 passed, 12
+skipped, 1 xfailed and **1 failed** —
 `test_every_public_name_is_importable_from_the_package_root`, on its last line,
 which compares `opik_rigor.__version__` against `importlib.metadata.version`. That
 venv holds an installed `opik_rigor-0.1.0.dist-info` while the tree says `0.1.1`,
@@ -555,9 +771,23 @@ cut 0.1.2, not as something that self-heals.
 **The pin rule lives in one module.** `pinning.py` is the single definition of
 "reproducible model id", imported by both the adapters and the judge. It was
 written before either of them precisely so the two could not drift apart on what
-the word means. An id must end in a concrete version marker (`-20250514`,
-`-2024-08-06`, `-v1`, `-2.1.0`) and must not contain `latest`, `newest`,
-`current`, `stable`, or `default`.
+the word means. An id must not contain `latest`, `newest`, `current`, `stable`, or
+`default`, and must end in a release designator — a release number
+(`claude-opus-4-8`), a date stamp (`-20250514`, `-2024-08-06`), or an explicit
+version (`-v1`, `-2.1.0`). It must also not be a member of one small, documented
+table of providers that publish `<family>-<number>` as a moving pointer.
+
+**The vendor-specific part of the pin rule is one table, on purpose.** Item 16
+below is what happens when a rule written against one vendor's naming convention
+outlives the convention. The replacement separates the half that is a property of
+naming in general — an alias has to be *named* `latest`, and a name ending in a
+word names a kind of model rather than a release of one — from the half that is
+irreducibly a provider policy, which no string can reveal. The second half is
+`_MOVING_FAMILIES` in `pinning.py`: one tuple, one provider today, with a comment
+saying it will need updating and a docstring section saying what the rule cannot
+catch. The point is that the next convention change costs a line in a table rather
+than a rewrite of the predicate — and that the gap is visible in advance rather
+than discovered by a consumer.
 
 **The evidence log has no delete API.** Not an oversight — `tests/test_evidence.py`
 asserts that no public name on `EvidenceLog` matches delete/remove/clear/truncate/

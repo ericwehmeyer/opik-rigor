@@ -20,6 +20,12 @@ attached to the exception as a dict so a caller does not have to parse prose.
 Anything given an :class:`~opik_rigor.evidence.EvidenceLog` writes exactly one
 ``assertion.evaluated`` record whether it passed or failed -- a gate that only
 records its passes is a highlight reel, not an audit trail.
+
+**What this module imports.** NumPy at module scope, for the score summaries and
+for accepting the numpy scalar types that array code and CSV round-trips produce.
+SciPy only inside :func:`assert_no_regression`, which is the sole caller that
+needs it: importing ``scipy.stats`` eagerly cost every suite about a second of
+warm import for a gate most of them never call.
 """
 
 from __future__ import annotations
@@ -27,10 +33,10 @@ from __future__ import annotations
 import math
 import operator
 from collections.abc import Sequence
+from statistics import NormalDist
 from typing import Any
 
 import numpy as np
-from scipy.stats import mannwhitneyu, norm
 
 from .errors import StatisticalAssertionError
 from .evidence import EVENT_ASSERTION, EvidenceLog
@@ -109,6 +115,29 @@ class RegressionError(StatisticalAssertionError):
 # --------------------------------------------------------------------------- #
 
 
+#: The standard normal, used only for its quantile function. ``NormalDist.inv_cdf``
+#: is CPython's implementation of Wichura's AS241, stdlib since 3.8, and this
+#: package requires >= 3.10 -- so ``scipy.stats.norm.ppf`` bought nothing here but
+#: the import of all of ``scipy.stats``. Swept against ``norm.ppf`` over 6.4M points
+#: of the open interval (0, 1): max relative deviation 1.22e-15, max 8 ULP.
+#: Propagated through :func:`_wilson` that shrinks to at most 3.3e-16 in the
+#: reported bound, and across 1,443,519 combinations of confidence x successes x n
+#: x min_rate it flips no gate verdict and changes no :func:`_runs_needed` answer.
+#:
+#: Constructed once at import: ``NormalDist()`` is cheap, but this sits on the
+#: pass-rate path, which is the most-called gate in the package.
+_STANDARD_NORMAL = NormalDist()
+
+
+def _z(probability: float) -> float:
+    """The standard normal quantile (inverse CDF) at ``probability``.
+
+    Split out so the three call sites read alike, and so that the one place which
+    would change if the quantile source ever moves again has a name.
+    """
+    return _STANDARD_NORMAL.inv_cdf(probability)
+
+
 def _clamp(value: float) -> float:
     """Squeeze a bound into ``[0, 1]``.
 
@@ -143,9 +172,9 @@ def _validate_unit(value: Any, name: str, *, exclusive: bool) -> float:
     """Validate a probability-valued argument.
 
     ``exclusive`` distinguishes a confidence or alpha (which must be strictly
-    inside ``(0, 1)`` -- ``norm.ppf(1.0)`` is infinite and a gate at alpha 0 can
-    never fire) from a threshold like ``min_rate``, where 0.0 and 1.0 are both
-    meaningful bars to set.
+    inside ``(0, 1)`` -- the normal quantile at 1.0 is infinite, and a gate at
+    alpha 0 can never fire) from a threshold like ``min_rate``, where 0.0 and 1.0
+    are both meaningful bars to set.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a number, got {type(value).__name__} {value!r}")
@@ -154,6 +183,40 @@ def _validate_unit(value: Any, name: str, *, exclusive: bool) -> float:
     if not ok:  # also catches NaN, which fails every comparison
         bounds = "strictly between 0 and 1" if exclusive else "between 0 and 1 inclusive"
         raise ValueError(f"{name} must be {bounds}, got {value!r}")
+    return numeric
+
+
+def _validate_gating_confidence(value: Any) -> float:
+    """Validate a *one-sided* confidence, and refuse the half of the range that inverts it.
+
+    ``z = ppf(c)`` is negative below 0.5, so the "lower bound" comes out *above*
+    the observed rate and gets **worse** as the sample grows:
+    ``wilson_lower_bound(89, 100, 0.0001)`` is 0.9615 and the same rate over 1000
+    runs gives 0.9216. At exactly 0.5, ``z`` is 0 and the bound *is*
+    ``successes / n`` -- so ``wilson_lower_bound(20, 20, 0.5)`` returns 1.0 and
+    ``assert_pass_rate((20, 20), 1.0, confidence=0.5)`` passes, which is the exact
+    claim this module's opening paragraph exists to refuse.
+
+    Both numbers are arithmetically correct, which is why this is a refusal rather
+    than a bug fix in the formula. Neither is a thing a caller wants, and the
+    failure is silent and backwards: ``confidence=0.3`` reads in a test file like
+    an act of statistical caution and produces a gate *looser* than comparing the
+    raw rate. A one-sided bound is a floor you are willing to defend, and there is
+    no level of belief below a coin flip that anyone defends.
+
+    The two-sided :func:`wilson_interval` keeps the full open interval and is not
+    routed through here: its ``z`` is ``ppf((1 + c) / 2)``, non-negative for every
+    ``c`` in ``(0, 1)``, so it never inverts.
+    """
+    numeric = _validate_unit(value, "confidence", exclusive=True)
+    if numeric <= 0.5:
+        raise ValueError(
+            f"confidence must be greater than 0.5 for a one-sided bound, got {value!r}. "
+            f"Below 0.5 the z is negative, so the 'lower bound' sits above the observed "
+            f"rate and falls as n grows -- more evidence, worse bound -- and a gate set "
+            f"there is looser than comparing the raw rate. At exactly 0.5 the bound is "
+            f"the raw rate. Use wilson_interval if you want the full range two-sided"
+        )
     return numeric
 
 
@@ -185,8 +248,9 @@ def _wilson(successes: int, n: int, z: float) -> tuple[float, float]:
     Wilson rather than the textbook normal approximation
     ``p +- z*sqrt(p(1-p)/n)`` because the latter is exactly wrong where an eval
     suite lives: at 20/20 it gives the interval ``[1.0, 1.0]``, claiming certainty
-    of perfection from twenty runs. Wilson gives roughly ``[0.86, 1.0]``, which is
-    what twenty runs actually buy you.
+    of perfection from twenty runs. Wilson gives ``[0.8389, 1.0]`` two-sided at
+    95%, or a one-sided 95% lower bound of ``0.8808`` -- the number a gate reads.
+    That is what twenty runs actually buy you.
 
     **Wilson rather than Clopper-Pearson**, the other standard choice. Both are
     defensible; the trade is coverage against power. Clopper-Pearson is *exact* in
@@ -233,7 +297,8 @@ def wilson_lower_bound(
 ) -> float:
     """One-sided lower confidence bound on the underlying success probability.
 
-    **One-sided**: ``z = norm.ppf(confidence)``, not ``norm.ppf(1 - (1-c)/2)``.
+    **One-sided**: ``z = NormalDist().inv_cdf(confidence)``, not
+    ``inv_cdf(1 - (1 - confidence) / 2)``.
     This is the number the pass-rate gate compares against, and a gate only ever
     asks "is the true rate at least X?" -- there is no upper bar to defend, so
     the full error budget goes to the floor. Using the two-sided z here would
@@ -242,18 +307,21 @@ def wilson_lower_bound(
     Args:
         successes: Runs that passed. ``0 <= successes <= n``.
         n: Total runs in the denominator. Must be >= 1.
-        confidence: Strictly between 0 and 1. Default 0.95.
+        confidence: Strictly between 0.5 and 1. Default 0.95. **Not** the full
+            unit interval: at or below 0.5 the one-sided z is zero or negative and
+            the bound stops being a floor, so it is refused rather than returned.
+            See :func:`_validate_gating_confidence`.
 
     Returns:
         The lower bound, clamped into ``[0.0, 1.0]``.
 
     Raises:
         ValueError: On ``n < 1``, ``successes`` outside ``[0, n]``, or a
-            confidence outside the open interval ``(0, 1)``.
+            confidence outside the open interval ``(0.5, 1)``.
     """
     successes, n = _validate_counts(successes, n)
-    level = _validate_unit(confidence, "confidence", exclusive=True)
-    lower, _ = _wilson(successes, n, float(norm.ppf(level)))
+    level = _validate_gating_confidence(confidence)
+    lower, _ = _wilson(successes, n, _z(level))
     return lower
 
 
@@ -264,8 +332,8 @@ def wilson_interval(
 ) -> tuple[float, float]:
     """Two-sided Wilson score interval, for reporting rather than gating.
 
-    **Two-sided**: ``z = norm.ppf(1 - (1 - confidence) / 2)``, so a 95% interval
-    splits its 5% error budget across both tails. Its lower end is therefore
+    **Two-sided**: ``z = NormalDist().inv_cdf(1 - (1 - confidence) / 2)``, so a 95%
+    interval splits its 5% error budget across both tails. Its lower end is therefore
     *below* :func:`wilson_lower_bound` at the same nominal confidence, and the two
     are not interchangeable -- this one is what you print when a human asks "what
     do we actually know about the rate?", the other is what a gate compares to.
@@ -275,41 +343,216 @@ def wilson_interval(
     """
     successes, n = _validate_counts(successes, n)
     level = _validate_unit(confidence, "confidence", exclusive=True)
-    z = float(norm.ppf(1.0 - (1.0 - level) / 2.0))
+    z = _z(1.0 - (1.0 - level) / 2.0)
     return _wilson(successes, n, z)
 
 
 def _runs_needed(p: float, min_rate: float, confidence: float, cap: int = 10_000_000) -> int | None:
-    """Smallest n at which an observed rate of ``p`` would clear ``min_rate``.
+    """Smallest n from which an observed rate of ``p`` clears ``min_rate`` and stays clear.
 
     Only meaningful when ``p > min_rate``: the bound converges upward to ``p`` as
     n grows, so if the observed rate is at or below the bar no amount of sampling
-    will clear it and the answer is "fix the system", not "run it more". Binary
-    search rather than a scan because the bound is monotone in n for fixed p.
+    will clear it and the answer is "fix the system", not "run it more".
 
-    Returned in the failure message purely as a courtesy -- it answers the first
-    question a reader of an underpowered failure asks.
+    **Not the smallest n that happens to clear**, which is a different and much
+    worse number. The predicate is ``wilson_lower(round(p*n), n) >= min_rate``,
+    and ``round`` makes it *oscillate* rather than switch on once: at ``p=0.95,
+    min_rate=0.90, confidence=0.95`` it holds at n = 86-90, fails at 91-99, holds
+    at 100-109, fails at 110-112, and holds from 113 on. 86 is the smallest n
+    satisfying it and is useless as a budget -- it clears only because
+    ``round(0.95 * 86) = 82`` rounds the rate *up* to 0.9535, and a reader told
+    "86 runs" who runs 91 fails anyway. What is reported is 113: the point past
+    which the answer no longer depends on where the rounding happens to land.
+    That is the property the caller actually needs, and the only one that survives
+    the reader adding a few runs for luck.
+
+    The number is well defined and cheap to find because there is a genuinely
+    monotone predicate underneath the oscillating one. ``round(p*n)`` is never
+    below ``floor(p*n - 0.5)``, so the Wilson bound at *that* count is a floor for
+    the real one; it rises with n (both its rate, ``>= p - 1/(2n)``, and its n
+    increase, and the bound rises in each), so a binary search on it is valid
+    where a binary search on the oscillating predicate is not -- the old one
+    returned an arbitrary clearing n, up to 31% above the minimum on one grid case
+    and below the stable point on others. The search finds the n from which
+    clearing is guaranteed whatever the rounding does, and a short walk downward
+    finds the last n that still failed. The walk is bounded by the width of the
+    oscillating band, which is ``O(sqrt(n))``: 12 steps or fewer on every case of
+    a 45-point grid, and 229 steps at ``n ~ 9e6``.
+
+    Args:
+        cap: Largest n considered. Searched directly rather than approached by
+            doubling, so the documented cap is the real one -- doubling from 1
+            topped out at 2**23 = 8,388,608 and returned None for answers that sat
+            comfortably inside the cap.
+
+    Returns:
+        The n described above, or None when no n at or below ``cap`` qualifies.
     """
     if not p > min_rate:
         return None
-    z = float(norm.ppf(confidence))
-    low, high = 1, 1
-    while high <= cap:
-        successes = round(p * high)
-        if _wilson(min(successes, high), high, z)[0] >= min_rate:
-            break
-        low = high + 1
-        high *= 2
-    else:
+    z = _z(confidence)
+
+    def guaranteed(n: int) -> bool:
+        """Does the bound clear at the least favourable rounding of ``p * n``?"""
+        successes = max(0, math.floor(p * n - 0.5))
+        return _wilson(min(successes, n), n, z)[0] >= min_rate
+
+    def clears(n: int) -> bool:
+        """Does the bound clear at the rounding that actually occurs?"""
+        successes = round(p * n)
+        return _wilson(min(successes, n), n, z)[0] >= min_rate
+
+    if not guaranteed(cap):
         return None
+    low, high = 1, cap
     while low < high:
         mid = (low + high) // 2
-        successes = round(p * mid)
-        if _wilson(min(successes, mid), mid, z)[0] >= min_rate:
+        if guaranteed(mid):
+            high = mid
+        else:
+            low = mid + 1
+    while low > 1 and clears(low - 1):
+        low -= 1
+    return low
+
+
+#: Power the second recommendation aims at. 0.80 is the conventional floor, and
+#: the point of reporting it is that the *first* recommendation does not reach it.
+_POWER_TARGET = 0.80
+
+#: Largest n the power search will consider. Past this the exact figure is noise
+#: -- nobody budgets four thousand model calls off a rounding -- and the search is
+#: a linear scan, so the cap is what keeps a failing assertion from stalling.
+_POWER_SEARCH_CAP = 2_000
+
+
+def _binomial_tail(k: int, n: int, p: float) -> float:
+    """``P(X >= k)`` for ``X ~ Binomial(n, p)``, exactly, using only the stdlib.
+
+    Summed with the recurrence ``pmf(i+1) = pmf(i) * (n-i)/(i+1) * p/(1-p)`` from a
+    single log-gamma seed, over the 14-sigma window around the mean. Everything
+    outside that window contributes less than 1e-40 -- far below the resolution of
+    a probability printed to two figures -- and restricting to it makes the sum
+    ``O(sqrt(n))`` instead of ``O(n)``, which is what lets the caller scan.
+
+    A normal approximation would have been one line, but this function exists to
+    say how often a *small* sample clears a gate, and the normal approximation to a
+    binomial is least trustworthy exactly there.
+    """
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    if p <= 0.0:
+        return 0.0
+    mean = n * p
+    sd = math.sqrt(n * p * (1.0 - p))
+    low = max(k, int(mean - 14.0 * sd) - 1)
+    high = min(n, int(mean + 14.0 * sd) + 1)
+    if k > high:
+        return 0.0
+    log_p, log_q = math.log(p), math.log1p(-p)
+    log_factorial_n = math.lgamma(n + 1.0)
+    term = math.exp(
+        log_factorial_n
+        - math.lgamma(low + 1.0)
+        - math.lgamma(n - low + 1.0)
+        + low * log_p
+        + (n - low) * log_q
+    )
+    total = term
+    ratio = p / (1.0 - p)
+    for i in range(low, high):
+        term *= (n - i) / (i + 1.0) * ratio
+        total += term
+    return min(1.0, total)
+
+
+def _minimum_successes(min_rate: float, n: int, z: float) -> int:
+    """Fewest passes out of ``n`` that clear the gate, or ``n + 1`` if none do.
+
+    Takes ``z`` rather than a confidence because the power search calls this tens
+    of thousands of times: routing each one through :func:`wilson_lower_bound`,
+    with its argument validation and a fresh :func:`_z`, turned a failing
+    assertion into a three-second pause.
+
+    Found by bisection on :func:`_wilson` itself rather than by inverting the
+    formula, so the power figure is computed against the very function the gate
+    calls -- an independently derived critical count that drifted from the gate by
+    one would misreport the power of a gate nobody had changed. Bisection is valid
+    here (unlike in :func:`_runs_needed`) because the bound really is monotone in
+    ``successes`` at fixed ``n``: no rounding sits between them.
+    """
+    if _wilson(n, n, z)[0] < min_rate:
+        return n + 1
+    low, high = 0, n
+    while low < high:
+        mid = (low + high) // 2
+        if _wilson(mid, n, z)[0] >= min_rate:
             high = mid
         else:
             low = mid + 1
     return low
+
+
+def _gate_power(p: float, min_rate: float, n: int, confidence: float) -> float:
+    """How often a *fresh* sample of ``n`` runs clears the gate, if the rate is ``p``.
+
+    Exact binomial power, not a normal approximation: the count of passes is
+    ``Binomial(n, p)``, the gate clears iff that count reaches
+    :func:`_minimum_successes`, and this is the probability of that.
+
+    This is the number that turns :func:`_runs_needed` from a promise into an
+    estimate. ``_runs_needed`` answers "at what n does an observed rate of p clear
+    the bar?", which is a fact about one arithmetic identity; it says nothing about
+    whether the *next* n runs will reproduce that rate, and they land above or
+    below it at random. At ``p=0.95, min_rate=0.90``, ``_runs_needed`` returns 113
+    and the power there is 0.66 -- a coin flip dressed as a budget.
+    """
+    return _binomial_tail(_minimum_successes(min_rate, n, _z(confidence)), n, p)
+
+
+def _runs_for_power(
+    p: float,
+    min_rate: float,
+    confidence: float,
+    target: float = _POWER_TARGET,
+    cap: int = _POWER_SEARCH_CAP,
+) -> int | None:
+    """Smallest n from which the gate clears at least ``target`` of the time.
+
+    The honest companion to :func:`_runs_needed`: not "how many runs make this
+    rate clear the bar" but "how many runs make it *likely* that a fresh sample
+    clears the bar", which is the question a reader budgeting runs is actually
+    asking. It comes out 1.5-2.2x larger.
+
+    ``_gate_power`` oscillates in n for the same lattice reason ``_runs_needed``
+    does, so the same discipline applies: what is returned is the point past which
+    the power stays at or above the target, found by scanning up from n=1 and
+    remembering the last n that fell short. The scan stops once it has seen
+    ``4*sqrt(n)`` consecutive sizes hold -- the oscillating band is ``O(sqrt(n))``
+    wide, and this window reproduces an unbounded brute-force scan on every case
+    tested. A plain "first n that reaches the target" would report 164 where the
+    answer is 188, with 165-187 falling short in between.
+
+    Returns None when no n at or below ``cap`` qualifies, in which case the caller
+    simply does not offer a powered budget -- an unreachable number is worse than
+    no number.
+    """
+    if not p > min_rate:
+        return None
+    z = _z(confidence)
+    last_failure = 0
+    n = 1
+    while n <= cap:
+        if _binomial_tail(_minimum_successes(min_rate, n, z), n, p) < target:
+            last_failure = n
+        elif n - last_failure > 4.0 * math.sqrt(n):
+            return last_failure + 1
+        n += 1
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -325,10 +568,20 @@ def _looks_like_counts(data: Any) -> bool:
     here and stated in the docstring rather than guessed per call site: a
     two-element **tuple** of non-boolean integers is a count pair; anything else,
     including ``(True, False)``, is a sequence of outcomes.
+
+    "Integer" includes ``numpy.integer``, for the same reason :func:`_as_count`
+    accepts it: numpy integers arrive routinely from array code, and
+    ``(np.int64(3), np.int64(5))`` used to fall through to the outcome branch and
+    be refused with "result[0] must be a bool (or 0/1)" -- a misdiagnosis that
+    sent the reader looking at their data instead of their dtype. ``np.bool_`` is
+    excluded alongside ``bool``: it is not an ``np.integer``, so the same rule
+    holds without a second check.
     """
     if not isinstance(data, tuple) or len(data) != 2:
         return False
-    return all(not isinstance(item, bool) and isinstance(item, int) for item in data)
+    return all(
+        not isinstance(item, bool) and isinstance(item, (int, np.integer)) for item in data
+    )
 
 
 def _coerce_pass_data(data: Any, argument: str = "result") -> tuple[int, int]:
@@ -376,7 +629,10 @@ def _coerce_scores(data: Any, argument: str) -> tuple[float, ...]:
     if hasattr(data, "scores") and callable(data.scores):
         return tuple(float(value) for value in data.scores())
     if isinstance(data, (str, bytes)):
-        raise ValueError(f"{argument} must be a sequence of numbers, got {type(data).__name__}")
+        raise ValueError(
+            f"{argument} must be a sequence of numbers, got {type(data).__name__} "
+            f"{_short_repr(data)}"
+        )
     try:
         values = list(data)
     except TypeError:
@@ -399,6 +655,24 @@ def _coerce_scores(data: Any, argument: str) -> tuple[float, ...]:
             raise ValueError(
                 f"{argument}[{index}] is NaN; a missing score is not a score, drop it "
                 f"deliberately rather than letting it poison the mean"
+            )
+        # Infinity is refused for the same reason as NaN, and more urgently. It
+        # does not merely poison the mean, it turns the gate green: inf - inf is
+        # nan, so the variance is nan, so `stddev > max_stddev` is False, so no
+        # violation is recorded and assert_score_distribution *passes* -- on a
+        # single unbounded score, with a bare numpy RuntimeWarning on stderr as the
+        # only sign anything happened. A gate that returns green on garbage is
+        # precisely what this library exists to prevent, and the same argument the
+        # n<2 stddev check makes ("reporting it as 0.0 would pass the strictest
+        # possible stddev gate on no evidence at all") applies here with the sign
+        # reversed: infinite evidence is not evidence either.
+        if math.isinf(numeric):
+            raise ValueError(
+                f"{argument}[{index}] is {numeric}; an infinite score is not a score. "
+                f"Every statistic over it comes back inf or nan, and a nan fails every "
+                f"comparison, so the gate would find no violation and pass. Clamp it to "
+                f"the ends of your scale, drop it deliberately, or fix whatever produced "
+                f"it -- but do not let it decide a build"
             )
         scores.append(numeric)
     return tuple(scores)
@@ -487,7 +761,9 @@ def assert_pass_rate(
             tuple, or a sequence of per-run bools. A two-element tuple of plain
             ints is read as counts; every other sequence is read as outcomes.
         min_rate: The bar, in ``[0.0, 1.0]``.
-        confidence: One-sided confidence for the bound. Default 0.95.
+        confidence: One-sided confidence for the bound. Strictly between 0.5 and
+            1; default 0.95. At or below 0.5 the bound inverts and the gate would
+            be looser than a raw comparison, so it is refused.
         evidence: If given, one ``assertion.evaluated`` record is appended --
             including when the gate fails, before the exception is raised.
         label: Free-text name for this gate, carried into the message and record.
@@ -502,7 +778,7 @@ def assert_pass_rate(
     """
     successes, n = _coerce_pass_data(result)
     successes, n = _validate_counts(successes, n)
-    level = _validate_unit(confidence, "confidence", exclusive=True)
+    level = _validate_gating_confidence(confidence)
     threshold = _validate_unit(min_rate, "min_rate", exclusive=False)
 
     # The whole point of the library, in one line: the gate is the *lower bound*,
@@ -536,6 +812,8 @@ def assert_pass_rate(
         return report
 
     underpowered = observed >= threshold
+    needed_power: float | None = None
+    powered: int | None = None
     if underpowered:
         needed = _runs_needed(observed, threshold, level)
         diagnosis = (
@@ -545,7 +823,27 @@ def assert_pass_rate(
             f"{lower:.1%}."
         )
         if needed is not None:
-            diagnosis += f" At this observed rate roughly {needed} runs would clear the bar."
+            # Two numbers, because one of them alone has been read as the other in
+            # every project that has shipped it. `needed` is arithmetic on this one
+            # rate: hold the rate at exactly `observed` and the bound clears from
+            # there on. It is not a power calculation, and quoting it alone invites
+            # the reader to budget `needed` runs and then be surprised a third of
+            # the time -- so the power at `needed` is stated next to it, and a
+            # genuinely powered n offered after it.
+            needed_power = _gate_power(observed, threshold, needed, level)
+            powered = _runs_for_power(observed, threshold, level)
+            diagnosis += (
+                f" Hold the rate at exactly {observed:.4f} and the bound clears from "
+                f"{needed} runs on. That is arithmetic on this one rate, not a power "
+                f"calculation: a fresh sample of {needed} runs from a system whose true "
+                f"rate is {observed:.1%} lands above or below {observed:.1%} at random, "
+                f"and clears this gate only {needed_power:.0%} of the time."
+            )
+            if powered is not None:
+                diagnosis += (
+                    f" Budget {powered} runs to clear it {_POWER_TARGET:.0%} of the time; "
+                    f"that is the number to plan against."
+                )
         elif observed == threshold:
             # p == min_rate exactly. The bound rises toward p as n grows but never
             # reaches it, so "sample more" is the wrong advice here and printing it
@@ -569,6 +867,9 @@ def assert_pass_rate(
         )
     report["underpowered"] = underpowered
     report["runs_needed"] = needed
+    report["power_at_runs_needed"] = needed_power
+    report["target_power"] = _POWER_TARGET
+    report["runs_for_target_power"] = powered
 
     message = (
         f"pass rate gate{_labelled(label)} failed: {successes}/{n} passed "
@@ -647,7 +948,10 @@ def assert_score_distribution(
         )
     for name, value in (("min_mean", min_mean), ("min_p10", min_p10), ("max_stddev", max_stddev)):
         if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
-            raise ValueError(f"{name} must be a number or None, got {type(value).__name__}")
+            raise ValueError(
+                f"{name} must be a number or None, got {type(value).__name__} "
+                f"{_short_repr(value)}"
+            )
     if max_stddev is not None and max_stddev < 0:
         raise ValueError(f"max_stddev must be >= 0, got {max_stddev!r}")
 
@@ -712,6 +1016,48 @@ def assert_score_distribution(
     raise ScoreDistributionError(message, **report)
 
 
+def _mannwhitneyu() -> Any:
+    """Import ``scipy.stats.mannwhitneyu`` on first use, not at module import.
+
+    This is the *only* thing in the package that needs SciPy, and importing it at
+    module scope made ``import opik_rigor`` pay for ``scipy.stats`` -- which drags
+    in ``scipy.optimize``, ``scipy.spatial``, ``scipy.sparse`` and
+    ``scipy.linalg`` -- on every suite, including the overwhelming majority that
+    only ever call :func:`assert_pass_rate`. Measured warm and interleaved, that
+    was 1018.6 ms of import against a ~40 ms interpreter floor; deferring it here
+    takes it to 247.2 ms. The regression gate still pays the full cost on first
+    call, which is the one caller that should.
+
+    **This deferral is only half the fix, and half does not work.** Deferring
+    ``mannwhitneyu`` while the Wilson bound still called ``scipy.stats.norm.ppf``
+    was measured at 213.4 ms to import and then 1096.7 ms to run
+    :func:`assert_pass_rate` -- no better than the 1070.6 ms it replaced, because
+    the first gate call imported the SciPy the module had just avoided importing.
+    The bound uses :class:`statistics.NormalDist` for exactly that reason; if it
+    is ever moved back onto SciPy, this deferral silently stops being one.
+
+    SciPy remains a hard, declared dependency, so the failure below is not an
+    expected path -- it is reachable only if a user's environment has lost it, or
+    if they installed the package's dependencies by hand. The message says so,
+    because a deferred import turns what used to be an import-time traceback into
+    one raised from the middle of a gate.
+    """
+    try:
+        from scipy.stats import mannwhitneyu
+    except ImportError as exc:  # pragma: no cover -- needs a scipy-free environment
+        raise ModuleNotFoundError(
+            "assert_no_regression needs SciPy, which is not importable here. It is the "
+            "only gate in opik_rigor that does: it runs the Mann-Whitney U test via "
+            "scipy.stats.mannwhitneyu, which is deliberately not reimplemented in this "
+            "package (scipy's carries the tie-corrected ranks and the exact null "
+            "distribution that make the p-value trustworthy). SciPy is a hard dependency "
+            "of opik-rigor, so this normally cannot happen -- install it with "
+            "`pip install scipy` or reinstall opik-rigor. assert_pass_rate and "
+            "assert_score_distribution do not need SciPy and keep working without it."
+        ) from exc
+    return mannwhitneyu
+
+
 def assert_no_regression(
     current: ScoreData,
     baseline: ScoreData,
@@ -723,7 +1069,9 @@ def assert_no_regression(
     """Assert that ``current`` is not significantly worse than ``baseline``.
 
     Uses ``scipy.stats.mannwhitneyu(current, baseline, alternative="less")`` and
-    raises iff ``p < alpha``.
+    raises iff ``p < alpha``. This is the only gate in the package that touches
+    SciPy, and it imports it on first call rather than at module import -- so a
+    suite that never calls this function never pays for ``scipy.stats``.
 
     **Direction convention.** ``alternative="less"`` asks exactly one question:
     is ``current`` stochastically *smaller* than ``baseline`` -- i.e. is a
@@ -776,7 +1124,7 @@ def assert_no_regression(
             + _no_scores_detail(baseline)
         )
 
-    result = mannwhitneyu(current_scores, baseline_scores, alternative="less")
+    result = _mannwhitneyu()(current_scores, baseline_scores, alternative="less")
     u_statistic = float(result.statistic)
     p_value = float(result.pvalue)
     # Fully tied samples (every value identical in both) carry no rank information;

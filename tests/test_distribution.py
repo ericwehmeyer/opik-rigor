@@ -26,11 +26,14 @@ from __future__ import annotations
 
 import math
 import random
+import warnings
 from collections.abc import Callable, Sequence
+from fractions import Fraction
 from itertools import product
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from scipy.stats import norm
 
@@ -38,6 +41,8 @@ from opik_rigor.distribution import (
     PassRateError,
     RegressionError,
     ScoreDistributionError,
+    _runs_needed,
+    _wilson,
     assert_no_regression,
     assert_pass_rate,
     assert_score_distribution,
@@ -61,7 +66,17 @@ SAME_SEED = 20260814
 SHIFTED_SEED = 20260815
 
 #: The one-sided z for the default 0.95 confidence, quoted rather than computed
-#: from the module: z = norm.ppf(0.95).
+#: from the module: z = scipy.stats.norm.ppf(0.95), the Cephes ``ndtri``.
+#:
+#: Since the module moved its quantile to :class:`statistics.NormalDist`
+#: (CPython's Wichura AS241), this constant is no longer the number the code uses:
+#: the stdlib gives 1.6448536269514715, seven ULP away. That is deliberate and it
+#: is an improvement -- the oracles below now run on a genuinely different
+#: implementation of the inverse normal, so their agreement with the module is
+#: cross-implementation rather than a restatement. Every predicate here is
+#: evaluated at this z and every one of them agrees with the module's answer,
+#: including the 45-point brute-force grid where the answer is an integer that a
+#: seven-ULP shift in z could in principle move by a whole run.
 Z_95 = 1.6448536269514722
 Z_95_SQUARED = 2.705543454095413
 
@@ -111,8 +126,94 @@ def mann_whitney_u1(current: Sequence[float], baseline: Sequence[float]) -> floa
 
 
 # --------------------------------------------------------------------------- #
+# Oracle 5 -- the gate predicate decided algebraically, and scanned
+# --------------------------------------------------------------------------- #
+
+
+def bound_clears(successes: int, n: int, min_rate: float, z: float = Z_95) -> bool:
+    """Oracle 5: is ``wilson_lower(successes, n) >= min_rate``, without a bound?
+
+    The Wilson interval *is* the set ``{p : |p_hat - p| <= z*sqrt(p(1-p)/n)}``, so
+    its lower end sits at or above ``min_rate`` exactly when ``min_rate`` falls
+    below that set -- which is one inequality, evaluated once::
+
+        (p_hat - min_rate) >= z * sqrt(min_rate*(1-min_rate)/n)
+
+    No root-finding, no quadratic, no closed form. That makes it both the cheapest
+    oracle in this file and the most independent of the code: it is the defining
+    inequality itself, and it lets the brute-force scans below cover thousands of
+    n without costing anything.
+    """
+    return (successes / n - min_rate) >= z * math.sqrt(min_rate * (1.0 - min_rate) / n)
+
+
+def gate_clears_at(p: float, min_rate: float, n: int, z: float = Z_95) -> bool:
+    """Oracle 5: the predicate ``_runs_needed`` searches, evaluated directly."""
+    return bound_clears(min(round(p * n), n), n, min_rate, z)
+
+
+def last_failing_n(p: float, min_rate: float, ceiling: int, z: float = Z_95) -> int:
+    """Oracle 5: brute force. Largest ``n <= ceiling`` at which the gate still fails.
+
+    One past this is the n from which the gate clears *and keeps clearing*, which
+    is what ``_runs_needed`` owes its reader. Returns 0 when nothing fails.
+    """
+    failures = [n for n in range(1, ceiling + 1) if not gate_clears_at(p, min_rate, n, z)]
+    return failures[-1] if failures else 0
+
+
+def minimum_successes_by_scan(min_rate: float, n: int, z: float = Z_95) -> int:
+    """Oracle 5: fewest passes out of n that clear the bar, by trying every count."""
+    for successes in range(n + 1):
+        if bound_clears(successes, n, min_rate, z):
+            return successes
+    return n + 1
+
+
+# --------------------------------------------------------------------------- #
+# Oracle 6 -- binomial tails in exact rational arithmetic
+# --------------------------------------------------------------------------- #
+
+
+def binomial_tail_exact(k: int, n: int, p: float) -> float:
+    """Oracle 6: ``P(X >= k)`` for ``X ~ Binomial(n, p)``, summed as Fractions.
+
+    Every term is ``comb(n, i) * p**i * (1-p)**(n-i)`` in exact rational
+    arithmetic over the binary value of ``p``, summed across the whole upper tail
+    with no window and nothing rounded until the end. No logarithms, no gamma
+    functions, no scipy -- which is the point, since the implementation reaches
+    the same number from a log-gamma seed and a multiplicative recurrence over a
+    truncated window.
+    """
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    probability = Fraction(p)
+    complement = 1 - probability
+    total = sum(
+        (math.comb(n, i) * probability**i * complement ** (n - i) for i in range(k, n + 1)),
+        Fraction(0),
+    )
+    return float(total)
+
+
+def gate_power_exact(p: float, min_rate: float, n: int, z: float = Z_95) -> float:
+    """Oracle 6: how often a fresh sample of n runs clears the gate, if the rate is p."""
+    return binomial_tail_exact(minimum_successes_by_scan(min_rate, n, z), n, p)
+
+
+# --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+
+def assert_pass_rate_report_for(result: Any, min_rate: float) -> dict[str, Any]:
+    """The report dict from a pass-rate gate that is expected to fail."""
+    with pytest.raises(PassRateError) as excinfo:
+        assert_pass_rate(result, min_rate)
+    return dict(excinfo.value.stats)
+
 
 #: Oracle 3. Computed by bisecting the defining inequality before the
 #: implementation was written; hardcoded so the module cannot move them.
@@ -230,6 +331,20 @@ def test_two_sided_lower_end_sits_below_the_one_sided_bound() -> None:
             assert two_sided_lower < wilson_lower_bound(successes, n, 0.95)
 
 
+def test_the_wilson_docstring_worked_example_is_a_number_the_code_produces() -> None:
+    # The docstring's 20/20 example read "roughly [0.86, 1.0]". 0.86 is neither
+    # end of anything: two-sided 95% is [0.8389, 1.0] and the one-sided 95% lower
+    # bound is 0.8808. A worked example in a statistics library is a claim, and
+    # this one was checkable and wrong -- so it is checked, by Oracle 1.
+    documentation = _wilson.__doc__ or ""
+    two_sided_lower = wilson_lower_by_bisection(20, 20, 0.975)
+    one_sided_lower = wilson_lower_by_bisection(20, 20, 0.95)
+
+    assert "0.86" not in documentation
+    assert f"``[{two_sided_lower:.4f}, 1.0]`` two-sided" in documentation
+    assert f"lower bound of ``{one_sided_lower:.4f}``" in documentation
+
+
 # --------------------------------------------------------------------------- #
 # Oracle 2 -- analytic identities
 # --------------------------------------------------------------------------- #
@@ -258,7 +373,9 @@ def test_at_zero_successes_the_bound_is_nil_at_every_n_and_confidence() -> None:
     # The same cancellation, swept rather than spot-checked. Tolerant to 1e-15 so
     # that it measures the mathematics; the exactness of the result is the
     # separate (xfailing) test below.
-    for confidence in (*SWEEP_CONFIDENCES, 0.50, 0.999):
+    # 0.50 dropped from the sweep: the one-sided bound refuses it now, and why
+    # is pinned in test_a_one_sided_confidence_at_or_below_a_half_is_refused.
+    for confidence in (*SWEEP_CONFIDENCES, 0.51, 0.999):
         for n in range(1, 301):
             assert wilson_lower_bound(0, n, confidence) == pytest.approx(0.0, abs=1e-15)
 
@@ -339,7 +456,7 @@ def test_the_bound_falls_as_confidence_rises() -> None:
         assert decreasing(
             [
                 wilson_lower_bound(successes, n, confidence)
-                for confidence in (0.50, 0.80, 0.90, 0.95, 0.99, 0.999)
+                for confidence in (0.51, 0.80, 0.90, 0.95, 0.99, 0.999)
             ]
         )
 
@@ -488,7 +605,131 @@ def test_an_underpowered_failure_says_so_rather_than_blaming_the_system() -> Non
     assert "underpowered sample, not a demonstrated failure" in message
     assert isinstance(stats["runs_needed"], int)
     assert stats["runs_needed"] > 20
-    assert f"roughly {stats['runs_needed']} runs" in message
+    assert f"the bound clears from {stats['runs_needed']} runs on" in message
+
+
+# --------------------------------------------------------------------------- #
+# how many more runs -- the number, and what it is not
+# --------------------------------------------------------------------------- #
+
+#: 45 (min_rate, observed) pairs spanning the bars an eval suite actually sets and
+#: margins from a fifth of a point to twenty points.
+RUNS_NEEDED_GRID: tuple[tuple[float, float], ...] = tuple(
+    (min_rate, round(min(min_rate + margin, 0.999), 4))
+    for min_rate in (0.70, 0.75, 0.80, 0.85, 0.90)
+    for margin in (0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15, 0.20)
+)
+
+
+def test_the_runs_needed_predicate_oscillates_so_its_minimum_is_not_a_budget() -> None:
+    # The premise of the whole item. successes = round(p*n) rounds the observed
+    # rate up at some n and down at others, so the predicate does not switch on
+    # once and stay on -- and a binary search, which assumes it does, lands
+    # wherever the oscillation happens to put it.
+    holds = {n for n in range(80, 130) if gate_clears_at(0.95, 0.90, n)}
+
+    assert min(holds) == 86
+    assert not (set(range(91, 100)) & holds)
+    assert set(range(100, 110)) <= holds
+    assert not (set(range(110, 113)) & holds)
+    assert set(range(113, 130)) <= holds
+
+    # So 86 -- "the smallest n that clears" -- is a trap. It clears only because
+    # round(0.95 * 86) = 82 rounds the rate up to 0.9535; a reader told "86 runs"
+    # who runs 91 for luck fails, which is the opposite of what a budget is for.
+    assert round(0.95 * 86) / 86 > 0.95
+    assert not gate_clears_at(0.95, 0.90, 91)
+
+
+@pytest.mark.parametrize(("min_rate", "observed"), RUNS_NEEDED_GRID)
+def test_runs_needed_is_one_past_the_last_n_that_fails(min_rate: float, observed: float) -> None:
+    # The claim being tested is not "some n that clears" but "the n past which the
+    # answer stops depending on where round() lands". Oracle 5 scans every n up to
+    # a ceiling set from the closed form n* = z^2*m(1-m)/(p-m)^2 -- generously,
+    # since the ratio of the true answer to n* runs as high as 1.3 -- and reports
+    # the last one that fails. One past that is the whole answer.
+    n_star = Z_95_SQUARED * min_rate * (1.0 - min_rate) / (observed - min_rate) ** 2
+    ceiling = int(1.8 * n_star) + 40
+
+    assert _runs_needed(observed, min_rate, 0.95) == last_failing_n(observed, min_rate, ceiling) + 1
+
+
+def test_the_documented_cap_is_the_cap() -> None:
+    # Approaching the cap by doubling from 1 topped out at 2**23 = 8,388,608:
+    # 16,777,216 exceeded the documented 10,000,000 and fell out of the loop, so
+    # every answer in the 8.4M-10M band came back as None -- "no sample size can
+    # do this" -- for margins where a finite, in-cap answer exists. The closed
+    # form here is about 9.0e6, comfortably inside the documented cap.
+    answer = _runs_needed(0.9001645, 0.9, 0.95)
+
+    assert answer is not None
+    assert 8_388_608 < answer <= 10_000_000
+    assert gate_clears_at(0.9001645, 0.9, answer)
+    assert not gate_clears_at(0.9001645, 0.9, answer - 1)
+
+    # And past the cap the answer really is None, rather than a number above it.
+    assert _runs_needed(0.9001645, 0.9, 0.95, cap=1_000_000) is None
+
+
+def test_the_underpowered_message_refuses_to_be_read_as_a_power_calculation() -> None:
+    # 19/20 against a 0.90 bar. runs_needed is 113, and the exact binomial chance
+    # that a fresh 113 runs from a system whose true rate really is 0.95 clears
+    # this gate is 0.66 -- a coin flip. Quoting 113 on its own, as "roughly 113
+    # runs would clear the bar" did, is read as a budget and is wrong a third of
+    # the time. The message now carries the power next to the number.
+    with pytest.raises(PassRateError) as excinfo:
+        assert_pass_rate((19, 20), 0.90)
+
+    message = str(excinfo.value)
+    stats = excinfo.value.stats
+
+    assert stats["runs_needed"] == 113
+    assert stats["power_at_runs_needed"] == pytest.approx(
+        gate_power_exact(0.95, 0.90, 113), abs=1e-12
+    )
+    assert 0.6 < stats["power_at_runs_needed"] < 0.7
+    assert "not a power calculation" in message
+    assert "clears this gate only 66% of the time" in message
+
+    # And a number that *is* a budget is offered beside it.
+    assert stats["target_power"] == 0.80
+    assert stats["runs_for_target_power"] == 188
+    assert "Budget 188 runs to clear it 80% of the time" in message
+
+
+def test_the_powered_recommendation_reaches_the_target_and_stays_there() -> None:
+    # Derived, not asserted: Oracle 6 recomputes the exact binomial power from
+    # Fractions at the recommended n and at the n below it.
+    powered = assert_pass_rate_report_for((19, 20), 0.90)["runs_for_target_power"]
+
+    assert gate_power_exact(0.95, 0.90, powered) >= 0.80
+    assert gate_power_exact(0.95, 0.90, powered - 1) < 0.80
+
+    # It is emphatically not "the first n that reaches 80%": power oscillates for
+    # the same lattice reason the bound does, and 164 is the first crossing while
+    # 165-187 fall back below it. Reporting 164 would under-budget by 13%.
+    first_crossing = next(n for n in range(1, 300) if gate_power_exact(0.95, 0.90, n) >= 0.80)
+    assert first_crossing == 164
+    assert powered == 188
+    assert any(gate_power_exact(0.95, 0.90, n) < 0.80 for n in range(165, 188))
+    assert all(gate_power_exact(0.95, 0.90, n) >= 0.80 for n in range(188, 210))
+
+
+@pytest.mark.parametrize(
+    ("successes", "n", "min_rate"),
+    [(19, 20, 0.90), (18, 20, 0.85), (45, 50, 0.85), (95, 100, 0.92)],
+)
+def test_the_reported_power_matches_exact_rational_arithmetic(
+    successes: int, n: int, min_rate: float
+) -> None:
+    # The implementation sums a log-gamma-seeded recurrence over a 14-sigma
+    # window; Oracle 6 sums Fractions over the whole tail. Nothing is shared.
+    report = assert_pass_rate_report_for((successes, n), min_rate)
+    observed = successes / n
+
+    assert report["power_at_runs_needed"] == pytest.approx(
+        gate_power_exact(observed, min_rate, report["runs_needed"]), abs=1e-12
+    )
 
 
 def test_a_genuine_miss_says_more_runs_will_not_help() -> None:
@@ -1001,6 +1242,56 @@ def test_a_nan_confidence_is_rejected() -> None:
         wilson_lower_bound(14, 20, float("nan"))
 
 
+@pytest.mark.parametrize("confidence", [0.0001, 0.2896, 0.49, 0.5])
+def test_a_one_sided_confidence_at_or_below_a_half_is_refused(confidence: float) -> None:
+    # z = ppf(c) is zero at 0.5 and negative below it, so the "lower bound" stops
+    # being a floor: at 0.2896 it comes out *above* the observed rate, and it
+    # *falls* as the sample grows -- more evidence, worse bound. The arithmetic is
+    # right; the domain was wrong, and the failure was silent and backwards, since
+    # a gate written confidence=0.3 reads as caution and is looser than comparing
+    # the raw rate. Refused rather than documented, because nobody wants it.
+    with pytest.raises(ValueError, match="confidence must be greater than 0.5"):
+        wilson_lower_bound(157, 200, confidence)
+    with pytest.raises(ValueError, match=f"got {confidence!r}"):
+        assert_pass_rate((157, 200), 0.79, confidence=confidence)
+
+    # The two-sided interval is immune and keeps the whole open interval: its z is
+    # ppf((1 + c) / 2), which is non-negative everywhere in (0, 1).
+    lower, upper = wilson_interval(157, 200, confidence)
+    assert lower <= 157 / 200 <= upper
+
+
+def test_at_half_confidence_the_bound_would_have_been_the_raw_rate() -> None:
+    # Why 0.5 itself is refused and not merely warned about. z = 0 there, so the
+    # "bound" is successes/n exactly -- and the module's opening paragraph exists
+    # to say that 20/20 must never yield 1.0. It did, and a gate at min_rate=1.0
+    # passed on twenty runs. Oracle 5 confirms the arithmetic that used to run.
+    assert bound_clears(20, 20, 1.0, z=0.0)
+    assert bound_clears(157, 200, 157 / 200, z=0.0)
+
+    with pytest.raises(ValueError, match="confidence must be greater than 0.5"):
+        assert_pass_rate((20, 20), 1.0, confidence=0.5)
+
+
+def test_a_numpy_integer_count_pair_is_read_as_counts() -> None:
+    # (np.int64(190), np.int64(200)) is a count pair by every reading of the rule
+    # -- a two-element tuple of non-boolean integers -- but numpy integers are not
+    # `int`, so it fell through to the outcome branch and was refused with
+    # "result[0] must be a bool (or 0/1), got int64". That sent the reader to look
+    # at their data when the answer was their dtype, and _as_count's own docstring
+    # already says numpy integers arrive routinely from array code.
+    report = assert_pass_rate((np.int64(190), np.int64(200)), 0.9)
+
+    assert report["successes"] == 190
+    assert report["n"] == 200
+    assert report["lower_bound"] == pytest.approx(
+        wilson_lower_by_bisection(190, 200, 0.95), abs=1e-9
+    )
+
+    # np.bool_ is still outcomes, not counts: it is not an np.integer.
+    assert assert_pass_rate((np.bool_(True), np.bool_(True)), 0.1)["n"] == 2
+
+
 @pytest.mark.parametrize("alpha", [0.0, 1.0, 1.5, -0.1])
 def test_alpha_outside_the_open_unit_interval_is_rejected(alpha: float) -> None:
     with pytest.raises(ValueError, match="alpha must be strictly between 0 and 1"):
@@ -1047,6 +1338,44 @@ def test_a_nan_score_is_missing_data_rather_than_a_score() -> None:
 
     with pytest.raises(ValueError, match="is NaN"):
         assert_no_regression([1.0, float("nan")], [1.0, 2.0])
+
+
+@pytest.mark.parametrize(
+    ("scores", "gate", "statistic"),
+    [
+        ([1.0, 1.0, math.inf], {"max_stddev": 0.001}, "stddev"),
+        ([1.0, 1.0, -math.inf], {"min_p10": 4.9}, "p10"),
+        ([1.0, 1.0, math.inf], {"min_mean": 4.9}, "mean"),
+    ],
+)
+def test_an_infinite_score_is_refused_rather_than_passed(
+    scores: list[float], gate: dict[str, float], statistic: str
+) -> None:
+    # This is the failure the library exists to prevent, so it gets its own test.
+    # An infinite score makes every statistic inf or nan; a nan loses every
+    # comparison, so no violation is recorded and the gate returns *green* -- on a
+    # 0.001 stddev bar, over a sample containing infinity. The only sign anything
+    # happened was a bare numpy RuntimeWarning on stderr, which CI discards.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any leaked RuntimeWarning fails here
+        with pytest.raises(ValueError) as excinfo:
+            assert_score_distribution(scores, **gate)
+
+    message = str(excinfo.value)
+    assert "scores[2] is" in message
+    assert ("-inf" if any(value == -math.inf for value in scores) else "inf") in message
+    assert statistic in ("mean", "p10", "stddev")  # the gate that would have passed
+
+
+def test_an_infinite_score_is_refused_by_the_regression_gate_too() -> None:
+    # Same hole, other gate: mean_current came back inf and the comparison passed.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match=r"current\[1\] is inf"):
+            assert_no_regression([1.0, math.inf], [1.0, 2.0])
+
+        with pytest.raises(ValueError, match=r"baseline\[0\] is -inf"):
+            assert_no_regression([1.0, 2.0], [-math.inf, 2.0])
 
 
 def test_a_sequence_of_bools_in_a_score_gate_is_rejected() -> None:

@@ -31,7 +31,10 @@ class AnthropicAdapter:
     """Single-turn completions from a pinned Anthropic model.
 
     Args:
-        model_id: Exact model version, e.g. ``claude-sonnet-4-5-20250929``.
+        model_id: Exact model version, e.g. ``claude-opus-5`` or the dated
+            spelling ``claude-sonnet-4-5-20250929``. Anthropic's current ids
+            carry no date suffix; both forms are pinned. See
+            :mod:`opik_rigor.pinning`.
         max_tokens: Cap on the response length.
         temperature: Defaults to ``0.0`` -- a judge that is asked the same
             question twice should answer it the same way.
