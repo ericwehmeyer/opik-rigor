@@ -7,8 +7,124 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet. The two items under *Not fixed, and why* below are queued for 0.2,
-which is where this project puts changes that alter what a recorded sample means.
+Ten documentation defects, found by a cold-start stranger who installed
+`opik-rigor` 0.1.1 from PyPI and followed `README.md` literally. They are not ten
+faults. They are **one fault, ten times: a claim that is true of the source tree
+and false of the artifact a user installs** — the same sentence this changelog
+already used once, for 0.1.0's rubric.
+
+The two items under *Not fixed, and why* below are still queued for 0.2, which is
+where this project puts changes that alter what a recorded sample means.
+
+**None of this reaches an existing release.** A project's long description is
+frozen at upload time, so the page PyPI renders for 0.1.1 is the old README —
+dead links, elided hashes, unrunnable example — and it stays that way until a new
+version is uploaded. These fixes ship to readers with 0.1.2, not before.
+
+### Added
+
+- **The worked example ships inside the wheel**, as
+  `opik_rigor/examples/summarise_eval.py`, and the quickstart's last line is now
+  `python -m opik_rigor.examples.summarise_eval --seed 7 --n 40`.
+
+  It used to be `python examples/summarise_eval.py`. `examples/` is a directory in
+  the git tree; the distribution is `opik_rigor/` plus
+  `opik_rigor-0.1.1.dist-info/` and nothing else, so the one command the
+  quickstart ended on — after four paragraphs selling it — could not be run by
+  anybody who had followed the `pip install` line above it. The script itself was
+  never the problem: fetched from the repository it runs clean against the
+  published wheel, exit 0. Its *address* was the problem.
+
+  Two honest fixes existed — ship the example, or stop advertising it — and this
+  is the first, for the same reason 0.1.1 chose it for the rubric: a reader who
+  installs a library and is told there is a worked example is better off with the
+  example than with a shorter README. `--out` now defaults to `.rigor-run` under
+  the caller's working directory rather than beside the script, which after the
+  move would have been inside site-packages.
+
+  `tests/test_packaging.py` asserts both modules are in the built zip and runs the
+  example out of the *extracted* wheel with nothing else on the path, so a move
+  back out of the package fails a test rather than a stranger.
+
+- **`readme-paths`, a new check in `scripts/verify_release.py`.** It reads every
+  address the README hands a reader — markdown link targets, path arguments inside
+  fenced code blocks, and `python -m` targets under `opik_rigor` — and asserts each
+  resolves for somebody standing on the project page or on an install, rather than
+  in a checkout. It is the single check that catches both of the defects above and
+  below, and it generalises: this was the third time the project shipped an address
+  that only a checkout could resolve. Unit-tested in `tests/test_release_checks.py`
+  against hand-derived tables in the style of that file, plus synthetic wheels for
+  the broken cases this repository can no longer produce on purpose.
+
+  It refuses a relative link *even when the file is in the wheel*. `LICENSE` really
+  is shipped, under `.dist-info/licenses/`, and the link still 404s for the reader
+  who clicks it. Reachable and addressable are different claims, and conflating
+  them is how four dead links survived two releases.
+
+### Fixed
+
+- **Four repo-relative links in `README.md` 404 from the PyPI project page**
+  (`LICENSE` twice, `examples/`, `COMPATIBILITY.md`). PyPI renders a long
+  description with no repository, no branch and no directory behind it. All are now
+  absolute `https://github.com/...` URLs.
+
+- **The `[opik]` extra's two functions were unimportable from where the README
+  implied.** `log_sample_to_opik` and `log_assertion_to_opik` were named in prose
+  with no import path; they live in `opik_rigor.integrations.opik`, and reaching
+  for them at the package root raises `ImportError`. The README now gives the
+  import line.
+
+  The other direction — re-export both at the root — was considered and rejected,
+  because it is the one change that would break the property the same section
+  advertises: `opik_rigor/__init__.py` imports no integration at module scope, a
+  subprocess test asserts it, and that is what keeps `import opik_rigor` from ever
+  dragging in a vendor SDK. Here the docs were wrong and the code was right.
+
+- **The one *passing* output in the quickstart could not be produced from the code
+  the README gave.** It said "change `20` to `200` and `min_rate` to `0.8`" and
+  then showed `passed=True observed=0.9150 ...`. Doing exactly that prints nothing:
+  on success `assert_pass_rate` returns a report dict and is silent. The README now
+  shows the assignment and the `print`, and lists the full key set.
+
+  Worse than a missing `print`, and now stated in the README rather than left to be
+  discovered: the line reads `observed=` and the key is **`pass_rate`**. The
+  roadmap's own complaint that "the key names are not guessable" was being
+  illustrated, unwittingly, by the roadmap's own document.
+
+- **A block labelled "the output is pasted verbatim, nothing here is illustrative"
+  was neither.** The rubric-drift example showed a judge named `'j'` that appears
+  nowhere in the quickstart and elided its hashes with `...`, which the real message
+  never does. It is now a real message from a real run: judge `'summariser'`, both
+  sha256 hashes in full, and the exact edit that produces it. The paragraph making
+  the claim now states precisely what was done to the output — hard-wrapped, and
+  nothing else.
+
+- **`PROGRESS.md` said 0.1.1 was unreleased.** It has been on PyPI since
+  2026-08-13. Its test counts were stale as well and have been re-derived by
+  running, with the command beside each number.
+
+- **`examples/README.md` told the reader the judge was backed by
+  `rigor.FakeAdapter`.** The import package is `opik_rigor`; `rigor` on PyPI is an
+  unrelated HTTP-API-testing DSL, so that line pointed at somebody else's package —
+  the exact collision this project renamed itself to avoid, reintroduced in prose.
+
+- **`sample_of` was in `__all__` and in no document**, next to a `sample_over` that
+  the roadmap lists as not yet built. Two names one letter apart, one shipped and
+  undocumented, one documented and absent. `sample_of` is now described where the
+  gates are, and the roadmap entry for `sample_over` names the collision.
+
+- **The `## Development` block gave only `.venv/bin/python`.** The primary
+  development machine is Windows, where the interpreter is
+  `.\.venv\Scripts\python.exe`. Both forms are given, and both now run
+  `pytest tests examples` and `ruff check src tests scripts`.
+
+- **Install cost was stated nowhere.** Measured, into empty virtualenvs, cold:
+  `pip install opik-rigor` takes 54 s and grows a virtualenv from 11.5 MiB to
+  192.8 MiB (4 packages); `pip install "opik-rigor[opik]"` takes 4 min 48 s and
+  reaches 414.9 MiB across 74 packages, pulling litellm, openai, tokenizers,
+  huggingface-hub, tiktoken, sentry-sdk and three `tree-sitter` grammars. A reader
+  of "two functions, not a framework" does not expect the second number, so the
+  README now gives both.
 
 ## [0.1.1] - 2026-08-13
 

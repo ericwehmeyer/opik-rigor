@@ -24,7 +24,8 @@ it is a reconstruction.
 | 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
 | — | Publish | **v0.1.0 published to PyPI 2026-08-13** — `pip install opik-rigor` |
 | 5 | Phase 3: close the consumer-reported API gaps, additively | **complete** — items 10–15 and item 8's message closed; 534 passed offline / 543 with opik |
-| — | Release 0.1.1 | **prepared, not released** — branch `release/0.1.1`, 537 passed offline; see [Releasing 0.1.1](#releasing-011--what-is-prepared-and-what-remains) |
+| — | Release 0.1.1 | **v0.1.1 published to PyPI 2026-08-13** — `pip install opik-rigor==0.1.1` |
+| 6 | Documentation defects found by a cold-start stranger installing from PyPI | **complete** — see [Documentation defects](#documentation-defects-found-from-outside-2026-08-14) |
 
 ## Session 1 — module status
 
@@ -82,7 +83,7 @@ stake in the implementation:
 | `COMPATIBILITY.md` | written **before** any integration code | — |
 | `src/opik_rigor/integrations/opik.py` | done | `tests/test_integration_opik.py` — 11 |
 | `src/opik_rigor/integrations/pytest_plugin.py` | done | `tests/test_pytest_plugin.py` — 15 |
-| `examples/summarise_eval.py` + README | done | `examples/test_example_runs.py` — 19 |
+| `src/opik_rigor/examples/summarise_eval.py` + `examples/README.md` | done — **moved inside the package** on 2026-08-14, so `python -m opik_rigor.examples.summarise_eval` works from a bare install | `examples/test_example_runs.py` — 19, plus two wheel checks in `tests/test_packaging.py` |
 
 Two environments are maintained: `.venv` (no Opik — the suite must be green
 without it) and `.venv-opik` (Opik 2.2.28 installed, for the integration and
@@ -348,7 +349,10 @@ decide a verdict: `assert_pass_rate`'s success-dict key set, `underpowered` and
 `runs_needed` on the failure path, `lower_bound == 0.8596681784340271` for 38/40,
 and the 16-key regression report. It reports no problems.
 
-**Test counts, and why the headline number depends on the command.**
+**Test counts as of Phase 3, and why the headline number depends on the command.**
+These are the numbers Phase 3 measured, kept as its record. The current ones are
+under [Documentation defects](#documentation-defects-found-from-outside-2026-08-14)
+below, and they are larger because `main` has taken property-based tests since.
 
 | command | result |
 |---|---|
@@ -365,12 +369,25 @@ rewritten rather than added — `test_shipped_rubric_ends_with_the_output_format
 became `test_the_shipped_rubric_states_the_output_format_exactly_once`, asserting
 the inverse, because the thing it pinned turned out to be the bug.
 
-## Releasing 0.1.1 — what is prepared, and what remains
+## Releasing 0.1.1 — what shipped, and what remains
 
-Prepared on branch `release/0.1.1`, up to but not including the tag. Nothing has
-been tagged, pushed, released, or uploaded.
+**0.1.1 was published to PyPI on 2026-08-13.** `pip install opik-rigor` now
+resolves to it, and a clean-venv install was re-checked on 2026-08-14 while fixing
+the documentation defects below:
 
-What is done: the version is `0.1.1` in `pyproject.toml` and in
+```
+python -m venv venv-bare
+venv-bare\Scripts\python.exe -m pip install --no-cache-dir opik-rigor
+venv-bare\Scripts\python.exe -c "import opik_rigor; print(opik_rigor.__version__)"
+```
+
+→ `0.1.1`, from `venv-bare\Lib\site-packages\opik_rigor\__init__.py`. The
+paragraphs below were written before the upload and are kept as the record of what
+was prepared; the wording has been corrected where it said "not released", which is
+the same defect this file exists to catch — a document that is true of the moment
+it was written and false of the world it describes.
+
+What was done before the tag: the version is `0.1.1` in `pyproject.toml` and in
 `src/opik_rigor/__init__.py`, which must always move together because
 `test_every_public_name_is_importable_from_the_package_root` compares
 `__version__` against install-time metadata. `CHANGELOG.md` closes the section as
@@ -394,12 +411,12 @@ the changelog under the version heading; the short form is that this file reserv
 0.2 for items 8 and 9 in writing, and the only known consumer pinned
 `>=0.1.0,<0.2` on that reading.
 
-**Ship it rather than sit on it.** `main` currently documents
+**Ship it rather than sit on it.** ~~`main` currently documents
 `opik_rigor.example_rubric_path()` in the README quickstart, and the only
-installable version is 0.1.0, which has no such function. That window opened when
-`11da812` merged and closes when 0.1.1 is on the index. (The *published* 0.1.0
-README does not mention it — that page has its own, older instance of the same
-fault, recorded in the changelog.)
+installable version is 0.1.0, which has no such function.~~ That window opened when
+`11da812` merged and **closed on 2026-08-13 when 0.1.1 reached the index**. (The
+*published* 0.1.0 README does not mention it — that page has its own, older
+instance of the same fault, recorded in the changelog.)
 
 ### The trusted-publisher registrations already exist. Do not redo them.
 
@@ -415,7 +432,10 @@ evidence that anything is missing — the publisher is now attached to the proje
 Re-registering "to be safe" is superstition. If an upload ever fails at the auth
 step again, the fault is a name that *changed*, not one that is missing.
 
-### Steps remaining, in order
+### Steps, in order — 1 to 7 are done
+
+Steps 1–7 were carried out on 2026-08-13 and the upload succeeded; they are kept
+because the next release repeats them. **Steps 8 and 9 are the ones still open.**
 
 1. **Review and merge `release/0.1.1` into `main`.** Terminal, or a PR in a
    browser if you want CI to run on the merge candidate.
@@ -450,6 +470,85 @@ step again, the fault is a name that *changed*, not one that is missing.
    this is done.
 9. **Record the publish here**, as the `v0.1.0` row above records its own, and
    move `[Unreleased]`'s compare link forward if anything lands after the tag.
+
+## Documentation defects found from outside (2026-08-14)
+
+Ten defects, reported by a cold-start stranger who installed `opik-rigor` 0.1.1
+from PyPI and followed `README.md` literally. Every one of them is the same fault
+this file has already recorded twice under other names: **a claim that is true of
+the source tree and false of the artifact a user installs.** The full list and the
+per-defect reasoning is in `CHANGELOG.md` under `[Unreleased]`; what belongs here
+is the state it leaves the build in.
+
+**The worked example moved into the package.** `examples/summarise_eval.py` is now
+`src/opik_rigor/examples/summarise_eval.py`, and the README's last quickstart line
+is `python -m opik_rigor.examples.summarise_eval --seed 7 --n 40`. The old address
+was a directory in the git tree; the wheel is `opik_rigor/` plus
+`opik_rigor-0.1.1.dist-info/` and nothing else, so the command the quickstart ended
+on could not be run by anyone who had followed the install line above it. This is
+the same call that was already made for the rubric in Phase 3, item 15, and it was
+made the same way: ship the asset, do not delete the claim. `examples/` keeps its
+walkthrough and its subprocess test; the test now invokes `-m`, never a file path.
+
+**One new release check, `readme-paths`.** It reads every address the README hands
+a reader — markdown link targets, path arguments inside fenced code blocks, and
+`python -m` targets under `opik_rigor` — and asserts that each one resolves for
+somebody standing on PyPI or on an install rather than in a checkout. Wired into
+`scripts/verify_release.py` beside `readme-symbols` and unit-tested in
+`tests/test_release_checks.py` against hand-derived tables (L, C and M) and
+synthetic wheels, in the style of the rest of that file. Run against the README as
+it stood before this session it reports four unreachable addresses and blocks the
+release; run against the current one it passes.
+
+The check earns its place twice over: it also caught a sentence *added during this
+session*. A first draft of the extras paragraph wrote
+`from opik_rigor import log_sample_to_opik` in prose to say that the import does
+not work, and `readme-symbols` — correctly — read it as a claim that it does.
+
+**Measured on this branch** (Windows, Python 3.14.4, `PYTHONPATH` pointed at this
+worktree's `src/` so that the shared `.venv`'s editable install of the main
+checkout cannot answer instead):
+
+| command | result |
+|---|---|
+| `.venv\Scripts\python.exe -m pytest` | **691 passed, 11 skipped, 3 xfailed** |
+| `.venv\Scripts\python.exe -m pytest tests examples` | **710 passed, 11 skipped, 3 xfailed** |
+| `.venv\Scripts\python.exe -m ruff check src tests scripts examples` | clean |
+| `.venv\Scripts\python.exe scripts\verify_release.py` | **16 passed, 0 failed, 0 skipped** |
+
+`pytest` alone still honours `testpaths = ["tests"]` and therefore collects 19
+fewer than `pytest tests examples`; both numbers are above so neither can be read
+as a regression against the other.
+
+**The `.venv-opik` row is deliberately absent, and that is itself a finding.**
+`.venv-opik\Scripts\python.exe -m pytest tests examples` reports 712 passed, 8
+skipped, 3 xfailed and **1 failed** —
+`test_every_public_name_is_importable_from_the_package_root`, on its last line,
+which compares `opik_rigor.__version__` against `importlib.metadata.version`. That
+venv holds an installed `opik_rigor-0.1.0.dist-info` while the tree says `0.1.1`,
+so the failure is a stale environment and not a defect in this branch. It is
+recorded rather than quietly omitted: reinstalling that venv is a one-line fix
+(`.venv-opik\Scripts\python.exe -m pip install -e ".[dev]"`) and a number nobody
+can reproduce is worse than no number.
+
+**Install cost, measured because the README now states it.** Each into its own
+empty virtualenv, cold (`--no-cache-dir`), Python 3.14.4 on Windows:
+
+| requirement | time | venv size | packages |
+|---|---|---|---|
+| `opik-rigor` | 54.0 s | 11.5 MiB → 192.8 MiB | 4 |
+| `opik-rigor[opik]` | 287.5 s | 11.5 MiB → 414.9 MiB | 74 |
+
+scipy is 109.6 MiB and numpy 31.2 MiB, plus 19.3 and 20.1 MiB of bundled shared
+libraries; rigor's own code is 0.4 MiB. The extra adds litellm (101.9 MiB), openai,
+tokenizers, huggingface-hub, hf-xet, tiktoken, sentry-sdk, three `tree-sitter`
+grammars — and pytest, which Opik pulls in for its own plugin.
+
+**A README fix does not reach an existing release.** A project's long description
+is frozen at upload, so the page rendered on PyPI for 0.1.1 is still the old README
+— dead links, elided hashes, unrunnable example and all — and stays that way until
+a new version is uploaded. Anyone reading this should treat that as the reason to
+cut 0.1.2, not as something that self-heals.
 
 ## Decisions made, and why
 
@@ -509,8 +608,9 @@ and a quickstart that only shows success would be selling the wrong thing.
 ```
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m ruff check src tests
+.\.venv\Scripts\python.exe -m pytest tests examples
+.\.venv\Scripts\python.exe -m ruff check src tests scripts examples
+.\.venv\Scripts\python.exe scripts\verify_release.py
 ```
 
 Local venv is Python 3.14.4 with scipy 1.18.0 and pytest 9.1.1. CI runs Ubuntu and

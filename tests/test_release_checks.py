@@ -500,6 +500,124 @@ def test_the_real_readmes_pasted_traceback_is_not_read_as_a_claim():
 
 
 # ----------------------------------------------------------------------------------
+# README: addresses (new rules, tables L, C and M, hand-derived from the docstrings
+# of readme_relative_links, readme_command_paths and readme_module_targets)
+#
+# `readme_package_symbols` above asks whether a name the README uses exists in the
+# wheel. These ask the same of every address it gives -- a link, a file, a `-m`
+# target -- because that is where this project's recurring fault actually lands.
+# ----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "expected"),
+    [
+        ("L1", "see [LICENSE](LICENSE)", ["LICENSE"]),
+        ("L2", "[the index](https://pypi.org/project/opik-rigor/)", []),
+        # A fragment addresses this same document, which travels with it.
+        ("L3", "[extras](#optional-extras)", []),
+        ("L4", "in [`examples/`](examples/) and runs offline", ["examples/"]),
+        # The heading is not a file that can be missing; the file is.
+        ("L5", "[compat](docs/COMPATIBILITY.md#version-bounds)", ["docs/COMPATIBILITY.md"]),
+        ("L6", "![badge](img/ci.png)", ["img/ci.png"]),
+        ("L7", "[mail](mailto:nobody@example.com)", []),
+        ("L8", "[cdn](//cdn.example.com/x.png)", []),
+        ("L9", '[x](LICENSE "the licence text")', ["LICENSE"]),
+        ("L10", "[a](b.md) and then [c](d.md)", ["b.md", "d.md"]),
+        ("L11", "[ref]: COMPATIBILITY.md", ["COMPATIBILITY.md"]),
+        ("L12", "[ref]: https://github.com/ericwehmeyer/opik-rigor", []),
+        # Duplicates collapse and the result is sorted, so evidence lines are stable.
+        ("L13", "[a](LICENSE) [b](LICENSE)", ["LICENSE"]),
+        # The badge row of this very README, which carried one of the four dead links.
+        (
+            "L14",
+            "[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)",
+            ["LICENSE"],
+        ),
+    ],
+)
+def test_readme_relative_links(label, text, expected):
+    assert vr.readme_relative_links(text) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "expected"),
+    [
+        ("C1", _fenced("python examples/summarise_eval.py --seed 7 --n 40"),
+         ["examples/summarise_eval.py"]),
+        # The head of a segment is the program. This is the one path-shaped token in
+        # the real README that must NOT be looked for in the wheel: it is the
+        # reader's own virtualenv.
+        ("C2", _fenced(".venv/bin/python -m pytest"), []),
+        ("C3", _fenced(r"type examples\.rigor-run\evidence.jsonl"),
+         ["examples/.rigor-run/evidence.jsonl"]),
+        # Prose is not shell, exactly as for pip lines.
+        ("C4", "run `python examples/summarise_eval.py` to see it", []),
+        ("C5", _fenced("git clone https://github.com/comet-ml/opik"), []),
+        ("C6", _fenced('pip install -e ".[dev]"'), []),
+        # A directory is an address, but it is a link's job, not a command argument's.
+        ("C7", _fenced("python -m build --outdir dist/"), []),
+        ("C8", _fenced("cat docs/a.md && cat docs/b.md"), ["docs/a.md", "docs/b.md"]),
+        ("C9", _fenced('python -c "import opik_rigor"'), []),
+        ("C10", _fenced("python x/y.py", "python x/y.py"), ["x/y.py"]),
+        ("C11", _fenced("$ python examples/x.py"), ["examples/x.py"]),
+        ("C12", _fenced(".\\.venv\\Scripts\\python.exe -m pytest examples/test_example_runs.py"),
+         ["examples/test_example_runs.py"]),
+    ],
+)
+def test_readme_command_paths(label, text, expected):
+    assert vr.readme_command_paths(text) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "expected"),
+    [
+        ("M1", _fenced("python -m opik_rigor.examples.summarise_eval --seed 7 --n 40"),
+         ["opik_rigor.examples.summarise_eval"]),
+        # Somebody else's module. Not this project's to guarantee.
+        ("M2", _fenced("python -m pytest"), []),
+        ("M3", _fenced('.venv/bin/python -m pip install -e ".[dev]"'), []),
+        ("M4", _fenced(".\\.venv\\Scripts\\python.exe -m opik_rigor.examples.summarise_eval"),
+         ["opik_rigor.examples.summarise_eval"]),
+        ("M5", "run python -m opik_rigor.examples.summarise_eval to see it", []),
+        ("M6", _fenced("python -m opik_rigor"), ["opik_rigor"]),
+        # A prefix match is not a package match: the dot is required, and
+        # `opik_rigorous` is a different distribution entirely.
+        ("M7", _fenced("python -m opik_rigorous.thing"), []),
+        ("M8", _fenced("python -m opik_rigor.examples.summarise_eval",
+                       "python -m opik_rigor.examples.summarise_eval"),
+         ["opik_rigor.examples.summarise_eval"]),
+    ],
+)
+def test_readme_module_targets(label, text, expected):
+    assert vr.readme_module_targets(text) == expected, label
+
+
+def test_the_real_readme_has_no_repo_relative_links():
+    """The defect a cold-start stranger hit: four links (`LICENSE`, `examples/`,
+    `COMPATIBILITY.md`, `LICENSE` again) that 404 from the live PyPI page, because
+    the long description is rendered with no repository behind it."""
+    assert vr.readme_relative_links(_README.read_text(encoding="utf-8")) == []
+
+
+def test_the_real_readme_addresses_its_worked_example_as_a_module():
+    """The other half of the same defect. `python examples/summarise_eval.py` names a
+    directory that is in the git tree and in no installation; `-m` names a module the
+    wheel actually ships, which is a claim this suite and verify_release can check."""
+    text = _README.read_text(encoding="utf-8")
+    assert "opik_rigor.examples.summarise_eval" in vr.readme_module_targets(text)
+    assert "examples/summarise_eval.py" not in vr.readme_command_paths(text)
+
+
+def test_the_real_readmes_own_virtualenv_is_not_read_as_an_address():
+    """`.venv/bin/python` and `.venv\\Scripts\\python.exe` appear in the Development
+    block. They are the reader's interpreter, not a file this wheel owes them, and a
+    rule that demanded them inside the artifact would be unsatisfiable."""
+    paths = vr.readme_command_paths(_README.read_text(encoding="utf-8"))
+    assert not [p for p in paths if ".venv" in p]
+
+
+# ----------------------------------------------------------------------------------
 # entry_points.txt
 # ----------------------------------------------------------------------------------
 
@@ -708,6 +826,108 @@ def test_an_entry_point_whose_target_is_shipped_passes(tmp_path):
         },
     )
     assert vr.check_entry_points(wheel, repo).status == vr.PASS
+
+
+# ----------------------------------------------------------------------------------
+# check_readme_paths, against synthetic wheels
+#
+# The interesting cases are the broken ones, and this repository's own README can no
+# longer produce them -- which is the point of fixing it, and the reason the wheels
+# below are hand-built.
+# ----------------------------------------------------------------------------------
+
+#: A wheel that ships the worked example the way the package now does.
+_WHEEL_WITH_EXAMPLE = {
+    "opik_rigor/__init__.py": b"",
+    "opik_rigor/examples/__init__.py": b"",
+    "opik_rigor/examples/summarise_eval.py": b"",
+    "opik_rigor-0.1.1.dist-info/licenses/LICENSE": b"MIT License\n",
+}
+
+
+def _repo_with_readme(tmp_path: Path, readme: str) -> Path:
+    """A checkout in which `examples/summarise_eval.py` and `LICENSE` both exist.
+
+    Both have to exist for these tests to mean anything: the fault under test is an
+    address that is *right about the tree* and wrong about the wheel, so a tree
+    missing the file would exercise a different, louder bug.
+    """
+    repo = tmp_path / "repo"
+    (repo / "examples").mkdir(parents=True, exist_ok=True)
+    (repo / "examples" / "summarise_eval.py").write_bytes(b"")
+    (repo / "LICENSE").write_bytes(b"MIT License\n")
+    (repo / "README.md").write_text(readme, encoding="utf-8")
+    return repo
+
+
+def test_a_readme_that_runs_the_example_by_repo_path_is_caught(tmp_path):
+    """The defect exactly. The file is in the tree, the quickstart tells the reader
+    to run it, and the whole distribution is `opik_rigor/` plus its dist-info."""
+    repo = _repo_with_readme(tmp_path, _fenced("python examples/summarise_eval.py --seed 7"))
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    result = vr.check_readme_paths(wheel, repo)
+    assert result.status == vr.FAIL
+    assert any("in tree=True, in wheel=False" in line for line in result.evidence)
+    assert any("only in a checkout" in line for line in result.evidence)
+
+
+def test_the_same_example_addressed_as_a_module_passes(tmp_path):
+    repo = _repo_with_readme(
+        tmp_path, _fenced("python -m opik_rigor.examples.summarise_eval --seed 7")
+    )
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    assert vr.check_readme_paths(wheel, repo).status == vr.PASS
+
+
+def test_a_module_target_the_wheel_omits_is_caught(tmp_path):
+    """Moving the example into the package is only half the fix; the other half is
+    that the build has to carry it. A `-m` address is not self-verifying either."""
+    repo = _repo_with_readme(
+        tmp_path, _fenced("python -m opik_rigor.examples.summarise_eval --seed 7")
+    )
+    wheel = _wheel(tmp_path, {"opik_rigor/__init__.py": b""})
+    result = vr.check_readme_paths(wheel, repo)
+    assert result.status == vr.FAIL
+    assert any("ships neither" in line for line in result.evidence)
+
+
+def test_a_relative_link_fails_even_though_the_file_is_in_the_wheel(tmp_path):
+    """`LICENSE` really is in this wheel, under `.dist-info/licenses/`. The link
+    still 404s for the reader who clicks it on PyPI, because the page is rendered
+    with no repository behind it. Reachable and addressable are different claims,
+    and conflating them is how these four links survived a release."""
+    repo = _repo_with_readme(tmp_path, "MIT - see [LICENSE](LICENSE).\n")
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    result = vr.check_readme_paths(wheel, repo)
+    assert result.status == vr.FAIL
+    assert any("404s from the project page" in line for line in result.evidence)
+
+
+def test_the_absolute_form_of_that_link_passes(tmp_path):
+    repo = _repo_with_readme(
+        tmp_path,
+        "MIT - see [LICENSE](https://github.com/ericwehmeyer/opik-rigor/blob/main/LICENSE).\n",
+    )
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    assert vr.check_readme_paths(wheel, repo).status == vr.PASS
+
+
+def test_the_readers_own_interpreter_is_not_demanded_of_the_wheel(tmp_path):
+    """The Development block tells a reader to run `.venv/bin/python`. That is their
+    virtualenv. A check that insisted on finding it inside the artifact would be
+    unsatisfiable, and an unsatisfiable check gets deleted rather than obeyed."""
+    repo = _repo_with_readme(
+        tmp_path, _fenced(".venv/bin/python -m pytest", ".\\.venv\\Scripts\\python.exe -m pytest")
+    )
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    assert vr.check_readme_paths(wheel, repo).status == vr.PASS
+
+
+def test_an_absent_readme_is_a_failure_not_a_skip(tmp_path):
+    repo = tmp_path / "empty"
+    repo.mkdir()
+    wheel = _wheel(tmp_path, _WHEEL_WITH_EXAMPLE)
+    assert vr.check_readme_paths(wheel, repo).status == vr.FAIL
 
 
 # ----------------------------------------------------------------------------------

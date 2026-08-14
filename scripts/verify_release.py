@@ -512,6 +512,158 @@ def readme_package_symbols(text: str, package: str = IMPORT_NAME) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
+# README: addresses.
+#
+# `readme_package_symbols` above asks whether a *name* the README uses exists in the
+# wheel. These three ask the same question of every *address* it gives: a link a
+# reader can click, a file a command tells them to run, a module a `-m` names. The
+# defect is one defect, and this project has now shipped it three times -- a claim
+# that is true of the source tree and false of the artifact somebody installs:
+#
+#   0.1.0  the README linked `rubrics/example-rubric.md`, a repository path, and the
+#          wheel carried no rubric at all.
+#   0.1.0  the README linked `LICENSE` and `COMPATIBILITY.md` relatively, and PyPI
+#          renders a long description with no repository behind it, so they 404ed.
+#   0.1.1  the quickstart ended on `python examples/summarise_eval.py`, and the whole
+#          distribution is `opik_rigor/` plus `opik_rigor-0.1.1.dist-info/`.
+#
+# The first was caught by `check_wheel_example_rubric`, after it shipped. The other
+# two were caught by a stranger installing from PyPI and following the README
+# literally, which is not a release process. Hence these rules.
+# --------------------------------------------------------------------------------------
+
+# `[text](target)`, `![alt](src)`, and a trailing title -- `[x](LICENSE "the licence")`.
+#
+# The link text is allowed to contain one level of brackets, which is not pedantry:
+# a shields.io badge is written `[![License: MIT](https://img.shields.io/...)](LICENSE)`
+# and a flat `[^\]]*` stops at the *inner* `]`, matches the badge image's absolute
+# https target, and reports nothing. That is the shape of one of the four dead links
+# this rule exists to catch, so the flat form would have missed a quarter of the
+# defect while looking like it worked. The two alternatives start with disjoint
+# characters, so there is no backtracking to worry about.
+#
+# Angle-bracket targets containing spaces are deliberately not supported: they do not
+# appear here, and a rule nobody exercises is a rule nobody can trust.
+_MD_INLINE_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)<>\s]+)>?[^)]*\)")
+
+# A reference definition: `[label]: target`, up to three leading spaces per CommonMark.
+_MD_REFERENCE_DEF = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?(\S+?)>?\s*$", re.M)
+
+# An address that already resolves from anywhere: any scheme (`https:`, `mailto:`) or
+# a protocol-relative `//host/path`.
+_ABSOLUTE_TARGET = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.\-]*:|//)")
+
+
+def readme_relative_links(text: str) -> list[str]:
+    """Every markdown link target in `text` that resolves only inside a checkout.
+
+    Rule: a link is *relative* when it carries no scheme, is not protocol-relative,
+    and is not a bare `#fragment` pointing at this same document. Those are the ones
+    that 404 from the project page, because PyPI renders the long description
+    standing on nothing -- there is no repository, no branch and no directory behind
+    it. `LICENSE`, `examples/` and `COMPATIBILITY.md` were all live on this README
+    and all four of those links were dead on the index.
+
+    A trailing `#fragment` is stripped: `docs/x.md#heading` is an address to
+    `docs/x.md`, and the heading is not a file that can be missing.
+
+    The whole document is scanned, fences included, and that is a deliberate
+    over-report in the spirit of the frozen contract's "accepted over-reports": a
+    markdown link inside a code fence does not render as a link, but writing one is
+    already a mistake, and a loud false failure naming a target beats a quiet rule
+    that lets a real one through.
+    """
+    found: list[str] = []
+    for pattern in (_MD_INLINE_LINK, _MD_REFERENCE_DEF):
+        for match in pattern.finditer(text):
+            target = match.group(1).strip()
+            if not target or target.startswith("#"):
+                continue
+            if _ABSOLUTE_TARGET.match(target):
+                continue
+            target = target.split("#", 1)[0]
+            if target:
+                found.append(target)
+    return sorted(set(found))
+
+
+# A file extension at the end of a token: `.py`, `.jsonl`, `.md`. Bounded so that a
+# version specifier or a sentence's full stop cannot masquerade as one.
+_FILE_SUFFIX = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+
+# A URL, as distinct from a path. `git clone https://github.com/...` names no file
+# in this artifact.
+_URLISH = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+
+def readme_command_paths(text: str) -> list[str]:
+    """Every path-shaped *argument* to a command in the README's fenced code blocks.
+
+    Rule, in three parts, each of which excludes a real thing that would otherwise
+    be reported wrongly:
+
+    * **Fenced blocks only**, per the frozen contract's rule 1. A path named in
+      prose is usually a remark about the repository, not an instruction.
+    * **Arguments only, never the head of a command segment.** The head is the
+      program. `.venv/bin/python -m pytest` names the reader's own virtualenv, which
+      is not a claim about this artifact at all -- and it is the one path-shaped
+      token in this README that must *not* be looked for in the wheel.
+    * **A separator and an extension.** `examples/summarise_eval.py` qualifies;
+      `dist/` and `".[dev]"` do not. A directory argument is an address too, but it
+      is nearly always a link rather than a command argument, and
+      :func:`readme_relative_links` already has it.
+
+    Backslashes are folded to forward slashes so that a Windows spelling and a POSIX
+    one are one address rather than two.
+    """
+    found: list[str] = []
+    for block in fenced_code_blocks(text):
+        for line in block.splitlines():
+            for segment in command_segments(line):
+                for token in segment.split()[1:]:
+                    candidate = token.strip("\"'`")
+                    if not candidate or candidate.startswith("-"):
+                        continue
+                    if _URLISH.match(candidate):
+                        continue
+                    if "/" not in candidate and "\\" not in candidate:
+                        continue
+                    if not _FILE_SUFFIX.search(candidate):
+                        continue
+                    found.append(candidate.replace("\\", "/"))
+    return sorted(set(found))
+
+
+# `[<path/to/>]python[.exe] -m <module>`. The path prefix is already stripped by
+# `command_segments`, so only the `.exe` suffix has to be tolerated here.
+_PYTHON_DASH_M = re.compile(r"^(?:python3?|py)(?:\.exe)?\s+-m\s+([A-Za-z_][\w.]*)")
+
+
+def readme_module_targets(text: str, package: str = IMPORT_NAME) -> list[str]:
+    """Every `python -m <module>` in the README that names a module of this package.
+
+    The replacement address for the defect above: `python examples/summarise_eval.py`
+    became `python -m opik_rigor.examples.summarise_eval`, which is a claim about
+    what the *wheel* contains rather than about what a git checkout contains. It is
+    checked as such.
+
+    `python -m pytest`, `-m build` and `-m venv` are other people's modules and are
+    not this project's to guarantee, so only targets equal to the package or beneath
+    it are returned. `opik_rigorous.thing` is a different distribution and is not
+    beneath `opik_rigor` -- the dot is required, not merely a prefix match.
+    """
+    prefix = f"{package}."
+    found: list[str] = []
+    for block in fenced_code_blocks(text):
+        for line in block.splitlines():
+            for segment in command_segments(line):
+                match = _PYTHON_DASH_M.match(segment)
+                if match and (match.group(1) == package or match.group(1).startswith(prefix)):
+                    found.append(match.group(1))
+    return sorted(set(found))
+
+
+# --------------------------------------------------------------------------------------
 # Small process/archive utilities
 # --------------------------------------------------------------------------------------
 
@@ -1589,6 +1741,119 @@ def check_readme_symbols(probe: Probe, repo: Path, wheel: Path) -> Result:
     )
 
 
+def _module_members(module: str) -> tuple[str, str]:
+    """The two wheel members either of which would make `module` importable."""
+    stem = module.replace(".", "/")
+    return f"{stem}.py", f"{stem}/__init__.py"
+
+
+def check_readme_paths(wheel: Path, repo: Path) -> Result:
+    """Every address the README hands a reader must resolve from where they stand.
+
+    A reader stands on the project page and then on an install. Neither is a
+    checkout, and this is the check that says so:
+
+    * a **relative link** is dead on PyPI, which renders the long description with
+      no repository, no branch and no directory behind it;
+    * a **path argument** in a code block must be inside the wheel, or the command
+      cannot be run by anyone who followed the install line above it;
+    * a **`python -m` target** under this package must be a module the wheel ships.
+
+    Each finding prints whether the address exists *in the source tree*, because
+    that is the shape of every instance of this fault: true of the tree, false of
+    the artifact. An address that is wrong in both places is a different and much
+    louder bug; an address that is right in the tree and absent from the wheel is
+    this one, and it is invisible to `python -m build`, to `twine check`, and to
+    every test in this repository that imports through `src/`.
+
+    One thing this check deliberately does *not* do is accept a relative link on the
+    grounds that the file is in the wheel. `LICENSE` really is in the wheel, under
+    `.dist-info/licenses/`, and the link still 404s for the reader who clicks it.
+    Reachable and addressable are different claims.
+    """
+    name = "readme-paths"
+    readme = repo / "README.md"
+    if not readme.is_file():
+        return bad(name, "README.md does not exist", [])
+    text = readme.read_text(encoding="utf-8")
+
+    with zipfile.ZipFile(wheel) as zf:
+        members = set(zf.namelist())
+    roots = sorted({member.split("/", 1)[0] for member in members})
+
+    evidence = [
+        f"scanned: {readme}",
+        f"top-level entries in {wheel.name}: {roots}",
+    ]
+    problems: list[str] = []
+
+    links = readme_relative_links(text)
+    evidence.append(f"repo-relative markdown links ({len(links)}): {links or 'none'}")
+    for target in links:
+        in_tree = (repo / target).exists()
+        evidence.append(
+            f"link -> {target}: in the source tree={in_tree}, "
+            f"resolvable from the PyPI project page=False"
+        )
+        problems.append(
+            f"[...]({target}) is repo-relative and 404s from the project page; "
+            f"use the full https://github.com/... URL"
+        )
+
+    paths = readme_command_paths(text)
+    evidence.append(f"path arguments in code blocks ({len(paths)}): {paths or 'none'}")
+    for path in paths:
+        in_wheel = path in members
+        in_tree = (repo / path).exists()
+        evidence.append(f"command path -> {path}: in tree={in_tree}, in wheel={in_wheel}")
+        if not in_wheel:
+            problems.append(
+                f"the README tells the reader to run or open {path!r}, which is not in "
+                f"{wheel.name}"
+                + (
+                    " -- it exists only in a checkout, which is the whole defect"
+                    if in_tree
+                    else " and does not exist in this tree either"
+                )
+            )
+
+    modules = readme_module_targets(text)
+    evidence.append(f"`python -m` targets under {IMPORT_NAME} ({len(modules)}): "
+                    f"{modules or 'none'}")
+    for module in modules:
+        candidates = _module_members(module)
+        present = [c for c in candidates if c in members]
+        in_tree = any((repo / "src" / c).exists() for c in candidates)
+        evidence.append(
+            f"module -> {module}: in tree={in_tree}, in wheel={present[0] if present else 'ABSENT'}"
+        )
+        if not present:
+            problems.append(
+                f"the README says `python -m {module}` and the wheel ships neither "
+                f"{candidates[0]} nor {candidates[1]}"
+            )
+
+    if problems:
+        return bad(
+            name,
+            f"the README gives {len(problems)} address(es) a reader cannot reach",
+            evidence
+            + problems
+            + [
+                "This is the third instance of one fault: a claim true of the source",
+                "tree and false of the artifact. Fix the address or ship the file --",
+                "and note that a README correction reaches PyPI only on the next",
+                "upload, because a long description is frozen at upload time.",
+            ],
+        )
+    total = len(links) + len(paths) + len(modules)
+    return ok(
+        name,
+        f"every address the README gives resolves ({total} checked, 0 repo-relative links)",
+        evidence,
+    )
+
+
 # --------------------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------------------
@@ -1606,6 +1871,7 @@ WHEEL_DERIVED = (
     "version-not-dev",
     "twine-check",
     "readme-symbols",
+    "readme-paths",
 )
 
 
@@ -1689,6 +1955,7 @@ def main(argv: list[str] | None = None) -> int:
                 emit(result)
             emit(check_twine(sdist, wheel, repo))
             emit(check_readme_symbols(probe, repo, wheel))
+            emit(check_readme_paths(wheel, repo))
 
         emit(check_readme_pip_install(repo))
     finally:

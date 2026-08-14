@@ -3,20 +3,32 @@
 One example, told as one story: a summariser that is quietly bad at the thing
 that matters, and what rigor does about it.
 
+**The example itself is not in this directory.** It ships *inside the package*, at
+`src/opik_rigor/examples/summarise_eval.py`, so that the command below works from
+a bare `pip install opik-rigor` with no checkout. This directory holds the
+walkthrough you are reading and the test that keeps the example honest.
+
 ```
-.\.venv\Scripts\python.exe examples\summarise_eval.py --seed 7 --n 40
+python -m opik_rigor.examples.summarise_eval --seed 7 --n 40
+```
+
+On Windows, from this repository's virtualenv:
+
+```
+.\.venv\Scripts\python.exe -m opik_rigor.examples.summarise_eval --seed 7 --n 40
 ```
 
 That is the whole setup. **No network, no credentials, no API keys, no model
 provider, no Opik.** The "model under test" is a plain Python function and the
-judge is backed by `rigor.FakeAdapter`, so the run finishes in about a second
-and prints the same bytes every time for a given `--seed`.
+judge is backed by `opik_rigor.FakeAdapter` — the import package is `opik_rigor`;
+`rigor` on PyPI is an unrelated HTTP-API-testing DSL — so the run finishes in
+about a second and prints the same bytes every time for a given `--seed`.
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--seed` | `7` | Seeds the summariser and the judge. Same seed, same output, byte for byte. |
 | `--n` | `40` | Judge calls per run. Two runs are made — healthy and degraded. |
-| `--out` | `examples/.rigor-run` | Where the evidence log and the baseline are written. Cleared at the start of every run. |
+| `--out` | `.rigor-run` | Where the evidence log and the baseline are written, **relative to your current directory**. Cleared at the start of every run. |
 | `--opik` | off | Additionally mirror the run into Opik. **This is the only flag that needs anything outside the process** — see [The Opik leg](#the-opik-leg). |
 
 The test that keeps this honest:
@@ -25,9 +37,10 @@ The test that keeps this honest:
 .\.venv\Scripts\python.exe -m pytest examples/test_example_runs.py
 ```
 
-It runs the script as a subprocess — not as an import — checks the exit code and
-the phrases the walkthrough is supposed to contain, and runs it twice with the
-same seed to assert the output is byte-identical.
+It runs the example as a subprocess — `python -m opik_rigor.examples.summarise_eval`,
+the exact address given above, not a file path — checks the exit code and the
+phrases the walkthrough is supposed to contain, and runs it twice with the same
+seed to assert the output is byte-identical.
 
 ---
 
@@ -199,7 +212,7 @@ itself has them.
 Go and look at it:
 
 ```
-type examples\.rigor-run\evidence.jsonl
+type .rigor-run\evidence.jsonl
 ```
 
 ---
@@ -207,7 +220,7 @@ type examples\.rigor-run\evidence.jsonl
 ## The Opik leg
 
 ```
-.\.venv\Scripts\python.exe examples\summarise_eval.py --seed 7 --n 40 --opik
+.\.venv\Scripts\python.exe -m opik_rigor.examples.summarise_eval --seed 7 --n 40 --opik
 ```
 
 Everything above needs nothing outside the process. `--opik` is the exception: it
@@ -244,6 +257,6 @@ Two things to expect when you do have `opik` installed:
 
 | File | What it is |
 |---|---|
-| `summarise_eval.py` | The example. One script, one story, runnable. |
-| `test_example_runs.py` | Runs the script as a subprocess and asserts it still works and is still deterministic. |
-| `.rigor-run/` | Output: the evidence log and the baseline. Gitignored, cleared on every run. |
+| `../src/opik_rigor/examples/summarise_eval.py` | The example. One script, one story, runnable — and **in the wheel**, which is why it is not in this directory. |
+| `test_example_runs.py` | Runs the example as a subprocess (`-m opik_rigor.examples.summarise_eval`) and asserts it still works and is still deterministic. |
+| `.rigor-run/` | Output: the evidence log and the baseline. Written under your current directory, cleared on every run. |

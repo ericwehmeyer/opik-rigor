@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/opik-rigor)](https://pypi.org/project/opik-rigor/)
 [![CI](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml/badge.svg)](https://github.com/ericwehmeyer/opik-rigor/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/ericwehmeyer/opik-rigor/blob/main/LICENSE)
 
 Statistical assertions and pinned-judge evaluation primitives for LLM test suites.
 
@@ -79,6 +79,19 @@ The failure message *is* the statistical report. It distinguishes the two failur
 that matter, in as many words: **you missed the bar** versus **you did not sample
 enough to tell**.
 
+Every gate takes a `SampleResult`, and there are two ways to get one:
+
+- `sample(fn, n)` calls `fn` *n* times and records each run's value, outcome,
+  duration and exception.
+- `sample_of(values)` wraps results you already have in the same object — for
+  gating a run you collected elsewhere, or feeding a stored baseline into the
+  regression gate, without pretending to re-run either.
+
+`sample_of` is not `sample_over`. `sample_over(items, fn)` — map a function across
+a dataset — is a roadmap item below and **does not exist yet**; `sample_of` takes
+finished values and no function at all. Two names one letter apart, meaning
+opposite things, is exactly the kind of thing to read twice.
+
 ### 2. A pinned judge
 
 `PinnedJudge` refuses to run against an aliased model id — at construction, not
@@ -107,12 +120,25 @@ enforces it — an audit trail you can quietly edit is not an audit trail.
 
 ## Quickstart
 
-Everything below was executed in a clean virtualenv against the built wheel, and
-the output is pasted verbatim. Nothing here is illustrative.
+Every code block below was executed in a clean virtualenv holding nothing but the
+published `opik-rigor` 0.1.1 wheel from PyPI, and every message, number and hash
+below is that run's own output. The only editing is hard-wrapping long lines to
+the page width. Nothing is elided, abbreviated, or retyped from memory — where an
+earlier revision of this file showed `...` inside a hash, that was illustrative
+text under a claim of verbatim, and it is gone.
 
 ```bash
 pip install opik-rigor
 ```
+
+**What that costs.** Measured with
+`pip install --no-cache-dir opik-rigor` into an empty virtualenv (Python 3.14.4,
+Windows): **54 seconds**, and the virtualenv grows from **11.5 MiB to 192.8 MiB**.
+Four packages. Almost all of the weight is scipy (109.6 MiB, plus 19.3 MiB of
+bundled shared libraries) and numpy (31.2 MiB, plus 20.1 MiB); rigor's own code is
+0.4 MiB. The Wilson bound and the Mann-Whitney test are scipy's, and that is the
+bill for not hand-rolling them. The `[opik]` extra costs a great deal more — see
+[Optional extras](#optional-extras) before you add it.
 
 A worked example rubric ships **inside the package**, so the install gives you
 something to point the judge at:
@@ -157,28 +183,70 @@ The system needs real headroom above min_rate, or min_rate has to come down.
 `assert pass_rate >= 0.9` would have gone green on that sample.
 
 Same judge, same seed, sampled properly and gated at a bar it can actually
-defend — change `20` to `200` and `min_rate` to `0.8`:
+defend. Change `20` to `200` and `min_rate` to `0.8` — and keep the report the
+assertion hands back, because on success it prints nothing at all:
+
+```python
+report = assert_pass_rate(result, min_rate=0.8, evidence=log)
+print(
+    f"passed={report['passed']}  observed={report['pass_rate']:.4f}  "
+    f"lower_bound={report['lower_bound']:.4f}  min_rate={report['min_rate']}"
+)
+```
 
 ```
 passed=True  observed=0.9150  lower_bound=0.8768  min_rate=0.8
 ```
 
-And the other primitive — edit the rubric between two runs:
+Note `report['pass_rate']` under the word `observed`. That mismatch is not a typo
+here — it is the roadmap's "the key names are not guessable" complaint in its
+sharpest form, and it is why this block now shows the `print` rather than a line
+of output with no way to produce it. The full key set on success is `gate`,
+`label`, `passed`, `n`, `successes`, `failures`, `pass_rate`, `lower_bound`,
+`interval_lower`, `interval_upper`, `min_rate`, `confidence`, `method`.
+
+And the other primitive. Append one sentence to `rubric.md`, then build the same
+judge against the same evidence log:
+
+```python
+judge = PinnedJudge(adapter, "rubric.md", log, name="summariser")
+```
 
 ```
-RubricDriftError: rubric drift for judge 'j': evidence log last recorded
-a0a929f4c657...b6847, rubric file now hashes to 0c423008a579...bdb38. Scores
-before and after this change are not comparable. Pass accept_rubric_change=True
-to acknowledge and record the change.
+opik_rigor.errors.RubricDriftError: rubric drift for judge 'summariser': evidence log
+last recorded 556c1383350d73d71235e40c719cdf816bec8a5693cc4750ad01ae421128dc5d, rubric
+file now hashes to 7fec47c979db2382b0db137c54af2b361b1cd0d42e1067d5fc43c0d7a6b6c7d5.
+Scores before and after this change are not comparable. Pass
+accept_rubric_change=True to acknowledge and record the change.
 ```
+
+The first hash is the rubric that ships in the wheel; the second is that file with
+one line added. Both are printed in full, because half a hash is not something you
+can compare against a log — the message never abbreviates one.
 
 A full worked example — corpus, judge, both gates, a baseline, a simulated
-regression, and the audit trail — is in [`examples/`](examples/) and runs offline
-with no credentials:
+regression, and the audit trail — **ships inside the wheel** and runs offline with
+no credentials:
 
 ```bash
-python examples/summarise_eval.py --seed 7 --n 40
+python -m opik_rigor.examples.summarise_eval --seed 7 --n 40
 ```
+
+A module, not a path, deliberately. This line used to read
+`python examples/summarise_eval.py`, and `examples/` is a directory in the git
+tree that is not in the artifact — an install contains `opik_rigor/` and
+`opik_rigor-0.1.1.dist-info/` and nothing else — so the command this quickstart
+ended on could not be run by anyone who had followed the install instruction four
+paragraphs above it. The walkthrough of what it prints, screen by screen, is
+[in the repository](https://github.com/ericwehmeyer/opik-rigor/blob/main/examples/README.md).
+
+> **This one command is the exception to the paragraph at the top of this
+> section.** Everything else here was run against the published 0.1.1 wheel;
+> `opik_rigor.examples` is not in 0.1.1 and reaches PyPI with the next release.
+> A project's long description is frozen at upload, so the page rendered on PyPI
+> for 0.1.1 is the *old* README, ellipses and broken paths and all, and it stays
+> that way until a new version is uploaded. This file self-heals in the
+> repository; the index does not.
 
 ---
 
@@ -189,12 +257,37 @@ pip install "opik-rigor[opik]"     # log samples and verdicts to Opik
 pip install "opik-rigor[pytest]"   # @pytest.mark.rigor_repeat, rigor_judge fixture
 ```
 
-**Opik** — two functions, not a framework: `log_sample_to_opik` maps a sample to a
-trace with one span per run (a run that *raised* is visibly distinct from one that
-*failed*), and `log_assertion_to_opik` maps a gate's verdict to feedback scores.
-The verified API surface, the version bounds, the reasoning behind them, and a
-correction to a claim this project got wrong about Opik's own documentation are
-all in [COMPATIBILITY.md](COMPATIBILITY.md).
+**Opik** — two functions, not a framework. They live in
+`opik_rigor.integrations.opik`, **not** at the package root:
+
+```python
+from opik_rigor.integrations.opik import log_assertion_to_opik, log_sample_to_opik
+```
+
+Neither name is on the package root, and importing either from there raises
+`ImportError`. That is a deliberate arrangement rather than an oversight to be
+tidied away: `opik_rigor`'s `__init__` imports no integration at module scope — a
+test asserts it in a subprocess — so that `import opik_rigor` can never drag in a
+vendor SDK. Putting these two names on the package root is the one change that
+would break the property the last paragraph of this section is about.
+
+`log_sample_to_opik` maps a sample to a trace with one span per run (a run that
+*raised* is visibly distinct from one that *failed*), and `log_assertion_to_opik`
+maps a gate's verdict to feedback scores. The verified API surface, the version
+bounds, the reasoning behind them, and a correction to a claim this project got
+wrong about Opik's own documentation are all in
+[COMPATIBILITY.md](https://github.com/ericwehmeyer/opik-rigor/blob/main/COMPATIBILITY.md).
+
+**"Two functions, not a framework" describes rigor's side of the seam, not the
+install.** Measured the same way as the core install above, into its own empty
+virtualenv: `pip install --no-cache-dir "opik-rigor[opik]"` takes **4 minutes 48
+seconds** and produces a **414.9 MiB** virtualenv holding **74 packages**, against
+54 seconds, 192.8 MiB and 4 packages for the bare install. What arrives with it
+includes litellm (101.9 MiB), openai,
+tokenizers, huggingface-hub, hf-xet, tiktoken, sentry-sdk, three `tree-sitter`
+grammars, pydantic, boto3 type stubs — and pytest, which Opik pulls in for its own
+plugin. Add the extra when you want the dashboard; do not add it because the
+sentence above made it sound small.
 
 **pytest** — `@pytest.mark.rigor_repeat(n=50, min_rate=0.9)` runs a test *n* times
 and applies the gate to the outcomes. A body that returns passes; one that raises
@@ -258,7 +351,10 @@ the library annoying to use:
   typo protection, and the key names are not guessable (`lower_bound` vs
   `interval_lower` vs `min_rate`).
 - **`sample_over(items, fn)`.** `sample(fn, n)` hands `fn` nothing, so every caller
-  writing a real eval reimplements the same dataset-cycling closure.
+  writing a real eval reimplements the same dataset-cycling closure. Not to be
+  confused with the shipped `sample_of(values)`, which wraps values you already
+  have; the collision of names is itself a reason this one may end up called
+  something else.
 - **A seedable callable `FakeAdapter`.** `seed=` is rejected in exactly the
   `responses=<callable>` mode a realistic fake needs — the one shape that can react
   to its input is the one that cannot take a seed.
@@ -274,12 +370,28 @@ with it rather than competing.
 
 ## Development
 
+Linux and macOS:
+
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m pytest
-.venv/bin/python -m ruff check src tests
+.venv/bin/python -m pytest tests examples
+.venv/bin/python -m ruff check src tests scripts
 ```
+
+Windows (PowerShell), which is where this project is primarily developed — the
+interpreter is under `Scripts\`, not `bin/`, and it is `python.exe`:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest tests examples
+.\.venv\Scripts\python.exe -m ruff check src tests scripts
+```
+
+`pytest` on its own honours `testpaths = ["tests"]` from `pyproject.toml` and does
+not collect `examples/`, so it reports fewer tests than `pytest tests examples`.
+Neither number is wrong; they are answers to different questions.
 
 The suite is green with **no credentials and no network**. Anything needing a live
 provider is marked `requires_network` or `requires_opik` and deselected in CI. The
@@ -291,4 +403,9 @@ and one with, for the integration and plugin co-installation tests.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see
+[LICENSE](https://github.com/ericwehmeyer/opik-rigor/blob/main/LICENSE). The full
+text also ships inside the wheel, under
+`opik_rigor-<version>.dist-info/licenses/LICENSE`; the link is absolute because
+PyPI renders this file with no repository behind it, so a relative one 404s from
+the project page.
