@@ -23,6 +23,7 @@ evidence and belongs in the release record rather than in a unit test.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -209,32 +210,58 @@ def test_unknown_licence_text_yields_none_rather_than_a_guess():
 # ----------------------------------------------------------------------------------
 
 
+# The entries below are built with the *native* separator rather than written as
+# literals, because that is the only form the function will ever be handed: its
+# input is the running interpreter's `sys.path`, and no interpreter puts a
+# foreign-separator path there. Windows-literal paths were what this file used to
+# assert on, and they passed on Windows and failed on all four Ubuntu cells --
+# `Path(r"C:\x\site-packages").name` on POSIX is the whole string, because POSIX
+# has no backslash separator, so the entry was dropped rather than kept. The
+# property under test ("kept by directory name, not by location") is
+# platform-independent; only the spelling of a path is not.
+def _entry(*parts: str) -> str:
+    return str(Path(*parts))
+
+
 def test_only_site_packages_survives_as_a_dependency_path():
     """`src` is the entry an editable install of this repo adds, and it is the one
     that would answer every question about the wheel with the source tree. It is
     excluded by name, not by location, so this holds for any checkout."""
+    site = _entry("repos", "opik-rigor", ".venv", "Lib", "site-packages")
+    dist = _entry("usr", "lib", "python3", "dist-packages")
     kept = vr.dependency_paths(
         [
             "",
-            r"C:\repos\opik-rigor\src",
-            r"C:\repos\opik-rigor\.venv\Lib\site-packages",
-            r"C:\Python\Lib",
-            "/usr/lib/python3/dist-packages",
+            _entry("repos", "opik-rigor", "src"),
+            site,
+            _entry("Python", "Lib"),
+            dist,
         ]
     )
-    assert kept == [
-        r"C:\repos\opik-rigor\.venv\Lib\site-packages",
-        "/usr/lib/python3/dist-packages",
-    ]
+    assert kept == [site, dist]
 
 
 def test_dependency_paths_are_deduplicated():
-    entry = r"C:\repos\opik-rigor\.venv\Lib\site-packages"
+    entry = _entry("repos", "opik-rigor", ".venv", "Lib", "site-packages")
     assert vr.dependency_paths([entry, entry]) == [entry]
 
 
 def _probe(tmp_path):
     return vr.Probe(extract=tmp_path / "wheel-extract", workdir=tmp_path, deps=[])
+
+
+def _elsewhere(*parts: str) -> str:
+    """An absolute path that is definitely not inside the extraction directory.
+
+    Absolute on whichever platform is running, which the Windows literals this
+    replaced were not: on POSIX, `C:\\repos\\opik-rigor\\src` is a single *relative*
+    filename with no separators, so those cases still refused the answer but for
+    the wrong reason -- they exercised "a relative path" rather than "an absolute
+    path somewhere else on the developer's machine", which is the case the probe
+    exists to catch. `abspath` of a rooted path supplies the current drive on
+    Windows and changes nothing on POSIX.
+    """
+    return os.path.abspath(os.sep + os.path.join(*parts))
 
 
 def test_an_answer_from_the_extracted_wheel_is_accepted(tmp_path):
@@ -256,14 +283,15 @@ def test_an_answer_from_the_extracted_wheel_is_accepted(tmp_path):
     [
         ({"package_path": [], "package_file": None}, "no __path__"),
         (
-            {"package_path": [r"C:\repos\opik-rigor\src\opik_rigor"], "package_file": None},
+            {"package_path": [_elsewhere("repos", "opik-rigor", "src", "opik_rigor")],
+             "package_file": None},
             "outside the extracted wheel",
         ),
         # A namespace package multiplexes: the developer's src/ silently supplies
         # whatever the wheel omitted. This is the failure mode the sibling project
         # was actually bitten by, and an answer produced this way proves nothing.
         (
-            {"package_path": ["EXTRACT", r"C:\repos\opik-rigor\src\opik_rigor"]},
+            {"package_path": ["EXTRACT", _elsewhere("repos", "opik-rigor", "src", "opik_rigor")]},
             "outside the extracted wheel",
         ),
     ],
@@ -288,7 +316,7 @@ def test_a_file_outside_the_extraction_is_refused_even_when_the_path_looks_right
     broken = probe.isolation_broken(
         {
             "package_path": [str(probe.extract / "opik_rigor")],
-            "package_file": r"C:\repos\opik-rigor\src\opik_rigor\__init__.py",
+            "package_file": _elsewhere("repos", "opik-rigor", "src", "opik_rigor", "__init__.py"),
         }
     )
     assert broken is not None
