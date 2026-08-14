@@ -7,11 +7,110 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The two items under *Not fixed, and why* below are still queued for 0.2, which is
-where this project puts changes that alter what a recorded sample means.
+Three independent reviews of the published 0.1.1 wheel, landing together.
+
+The first was adversarial and numerical, working by derivation rather than by
+reading this code: bisection on the score-test inequality, exact `Fraction`
+arithmetic, and full brute-force scans. It confirmed that the Wilson bounds are
+exact to 2.2e-16 across 105 grid points, that nothing anywhere conflates
+one-sided with two-sided, that the pass-rate gate never gates on the point
+estimate, that Mann-Whitney's direction and statistic are right, and that the
+realised type-I error is calibrated at 0.048. It found the seven defects under
+**Fixed**. The second measured what `import opik_rigor` costs, and produced the
+first entry under **Changed**. The third came from outside the numbers entirely —
+an agent designing a third consumer, which could not construct a judge at all —
+and produced the two `is_pinned` entries at the end of **Fixed**, the defect
+`PROGRESS.md` recorded as item 16.
+
+**One change here is not additive**, and it is the only one: `wilson_lower_bound`
+and `assert_pass_rate` now refuse a `confidence` at or below 0.5, which they used
+to accept and answer. Everything else is purely additive — nothing renamed, no
+other signature narrowed, and no gate's verdict moved for input either of them
+still accepts. The items under *Not fixed, and why* below remain queued for 0.2,
+which is where this project puts changes that alter what a recorded sample means.
 
 ### Fixed
 
+- **A score-distribution gate returned green on infinite input.** This is the
+  worst thing in the release and it is the exact failure the library exists to
+  prevent. `_coerce_scores` refused NaN and never checked for infinity, so
+  `assert_score_distribution([1.0, 1.0, float("inf")], max_stddev=0.001)` computed
+  a standard deviation of `nan` (because `inf - inf` is `nan`), found that `nan >
+  0.001` is False, recorded no violation, and **passed** — a 0.001 spread gate,
+  cleared by a sample containing infinity. `min_p10=4.9` against `-inf` passed the
+  same way, and `assert_no_regression` reported `mean_current=inf` and passed. The
+  only outward sign was a bare `RuntimeWarning: invalid value encountered in
+  subtract` from numpy on stderr, which CI discards. Infinity is now refused where
+  NaN is, with a message that names the value and says what it would have done.
+  The function's own docstring had already made this argument for the `n < 2`
+  case: "reporting it as 0.0 would pass the strictest possible stddev gate on no
+  evidence at all."
+
+  The property suite asserts that no gate ever reports a NaN or an infinity in a
+  numeric field, and that property **held** while this defect was live — its score
+  generator draws from a 1-5 scale, a 0-1 scale and bounded uniforms, every one of
+  them finite, so no case it produced could reach the gate with a non-finite
+  score. The property was sound and its input domain stopped short of the defect,
+  which is the more useful half of the finding. Non-finite scores now sit in that
+  file's refusal table instead, where a refused input belongs.
+- **A one-sided confidence at or below 0.5 is refused instead of inverting the
+  gate.** `z = ppf(c)` is negative below 0.5, so `wilson_lower_bound` returned a
+  "lower bound" *above* the observed rate that got **worse** as the sample grew:
+  `wilson_lower_bound(89, 100, 0.0001)` is 0.9615 and the same rate over 1000 runs
+  gives 0.9216. At exactly 0.5 the z is zero and the bound *is* `successes / n`,
+  so `assert_pass_rate((20, 20), 1.0, confidence=0.5)` passed — twenty runs
+  proving perfection, which is the claim the module's opening paragraph exists to
+  refuse. Every one of those numbers was arithmetically correct at the level asked
+  for, which is why this is a narrowed domain and not a corrected formula: a gate
+  written `confidence=0.3` reads in a test file as an act of caution and was
+  looser than comparing the raw rate. Two-sided `wilson_interval` is immune (its z
+  is `ppf((1 + c) / 2)`, never negative) and keeps the full open interval.
+- **`_runs_needed` reported a number that was not the one it promised.** Its
+  docstring claimed the smallest n at which the observed rate clears the bar, and
+  justified a binary search with "the bound is monotone in n for fixed p". That is
+  false: `successes = round(p * n)` makes the predicate *oscillate*. At `p=0.95,
+  min_rate=0.90, confidence=0.95` it holds at n = 86-90, fails at 91-99, holds at
+  100-109, fails at 110-112 and holds from 113 on, so a binary search returns
+  whichever clearing n it happens to land on. 28 of 45 grid cases disagreed with a
+  brute-force scan. What is reported now is the point past which the answer stops
+  depending on where the rounding lands — 113 in that case — found by binary
+  search on a genuinely monotone predicate (the bound at the least favourable
+  rounding, `floor(p*n - 0.5)`) followed by a short walk down to the last n that
+  still failed. It is **not** the smallest n that clears, and deliberately so: 86
+  clears only because `round(0.95 * 86) = 82` rounds the rate up to 0.9535, and a
+  reader told "86 runs" who runs 91 for luck fails.
+
+  1,399 lines of property tests sat on this function and asserted only that the
+  answer was *sufficient* — that the bound really does clear at the number
+  returned — which 113 satisfies exactly as well as 86 does. The obvious repair,
+  "and `runs_needed - 1` must not clear", turns out to catch **0 of 45** grid
+  cases, because a binary search converges to a point where `low` clears and
+  `low - 1` fails whatever the predicate does in between; it is asserted now
+  because it is true, not because it is load-bearing. The assertion that bites is
+  the other one: every n *above* the answer must clear too. That is what the
+  oscillation breaks, and it is now checked over a window in the property suite
+  and against a full brute-force scan over a 45-point grid in the example suite.
+- **The runs-needed cap was 8,388,608, not the documented 10,000,000.** The search
+  approached the cap by doubling from 1 under `while high <= cap`, so 16,777,216
+  overshot and fell to the `else`: every answer in the 8.4M-10M band came back as
+  `None`, meaning "no sample size can do this", for margins where a finite in-cap
+  answer exists. `_runs_needed(0.9001645, 0.9, 0.95)` returned `None` against a
+  true answer of 9,004,248. The cap is now searched directly.
+- **Two refusals named the offending type and not the value**, unlike every other
+  refusal in the module: `min_mean must be a number or None, got str` and `scores
+  must be a sequence of numbers, got str`. Both now quote the value, which is what
+  a caller whose threshold arrived from a config file needs to see.
+- **A `(numpy.int64, numpy.int64)` count pair was misdiagnosed as outcomes.**
+  `_looks_like_counts` tested `isinstance(item, int)`, which numpy integers fail,
+  so `assert_pass_rate((np.int64(3), np.int64(5)), 0.5)` was refused with
+  `result[0] must be a bool (or 0/1), got int64` — pointing the reader at their
+  data when the answer was their dtype. `_as_count` had accepted numpy integers
+  all along, for the stated reason that they arrive routinely from array code.
+- **The `_wilson` docstring's worked example was wrong.** It said 20/20 gives
+  "roughly `[0.86, 1.0]`". The two-sided 95% interval is `[0.8389, 1.0]` and the
+  one-sided 95% lower bound is `0.8808`; 0.86 is neither. A worked example in a
+  statistics library is a claim, and this one is now asserted against an oracle in
+  the test suite rather than trusted.
 - **`is_pinned` rejected every current frontier Anthropic model id**, and
   `require_pinned` is on the path a new user hits in their first five minutes.
   `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8` and every other current id
@@ -26,27 +125,149 @@ where this project puts changes that alter what a recorded sample means.
   of model rather than one release of it, and a kind is what providers re-point.
   `_`, `@` and `:` now count as component separators, so Vertex
   (`claude-opus-4-5@20251101`) and Bedrock (`…-20241022-v2:0`) snapshot spellings
-  are recognised too.
-- **`gpt-4.1` was accepted as pinned** and is an OpenAI alias that re-points to the
-  newest dated snapshot — its `4.1` satisfied the old dotted-version branch. Found
-  while checking the fix above in both directions. Providers that publish
-  `<family>-<number>` as a moving pointer are now listed in one documented table in
-  `pinning.py`, which also refuses `gpt-5` and `gpt-4`; `gpt-4o-2024-08-06` and
-  `gpt-4.1-2025-04-14` are unaffected.
+  are recognised too. Whether an id re-points is ultimately a provider *policy* and
+  no string carries it, so that residue is isolated in one documented table in
+  `pinning.py` rather than spread through the predicate, and the module docstring
+  states what the rule still cannot catch.
+- **`gpt-4.1` was accepted as pinned**, and it is an OpenAI alias that re-points to
+  the newest dated snapshot — its `4.1` satisfied the old dotted-version branch.
+  Found while checking the fix above in *both* directions rather than only the one
+  that was reported. The same table refuses `gpt-5` and `gpt-4`;
+  `gpt-4o-2024-08-06` and `gpt-4.1-2025-04-14` are unaffected.
 
 ### Changed
 
-- **The `ModelPinError` message now names the clause that refused the id** and
-  quotes worked examples that are themselves pinned — a test asserts that, because
-  the previous message told the reader to add a date suffix, which for a current
-  Anthropic id names a model that does not exist.
-- `pinning.PINNED_EXAMPLES` is new: the examples the rejection message quotes,
-  exposed so a caller (and the test suite) can check the advice against the rule.
+- **`import opik_rigor` no longer imports SciPy** — 1018.6 ms of warm import
+  becomes 247.2 ms, and `assert_pass_rate` 1070.6 ms becomes 251.0 ms, against a
+  ~40 ms interpreter floor. `distribution.py` imported
+  `from scipy.stats import mannwhitneyu, norm` at module scope, and `__init__.py`
+  imports from that module, so every consumer paid for all of `scipy.stats` — and
+  with it `scipy.optimize`, `scipy.spatial`, `scipy.sparse` and `scipy.linalg`.
+  This package registers a `pytest11` entry point, so the cost landed at
+  *collection*, on every pytest run in a project that has it installed.
 
-Backwards compatibility: no signature changed and nothing was renamed. Every id
-0.1.1 accepted is still accepted **except `gpt-4.1`**, which it should not have
-accepted. Ids that were refused and are now accepted cannot break a caller, because
-the only thing `require_pinned` ever did with them was raise.
+  Two changes, and both were needed. `mannwhitneyu` moved inside
+  `assert_no_regression`, its only caller. The Wilson `z` now comes from
+  `statistics.NormalDist().inv_cdf` — CPython's Wichura AS241, stdlib since 3.8,
+  and this package already requires >= 3.10 — rather than `scipy.stats.norm.ppf`.
+  Deferring the SciPy import *alone* does almost nothing, and the measurement is
+  worth stating because the failure is invisible from the obvious benchmark. Timed
+  interleaved against a tree with both scipy names deferred but the Wilson z still
+  on `norm.ppf` (warm, min of 20, ms):
+
+  ```
+  scenario                              BEFORE   LAZY-ONLY      AFTER
+  interpreter floor                       36.6        39.3       45.3
+  import opik_rigor                     1018.6       213.4      247.2
+  import + assert_pass_rate             1070.6      1096.7      251.0
+  import + assert_score_distribution    1320.5       248.6      247.9
+  import + assert_no_regression         1143.8      1048.1     1023.2
+  ```
+
+  The lazy-only tree's *import* looks fixed at 213.4 ms, and then its
+  `assert_pass_rate` costs 1096.7 ms — no better than the 1070.6 ms it replaced,
+  because `norm.ppf` sits on the pass-rate path and the first gate call triggers
+  the import the module just deferred. The pass-rate and score-distribution gates
+  are now off SciPy entirely; the regression gate still pays the full import on
+  first call, which is the one caller that needs it, and is unchanged
+  (1143.8 → 1023.2 ms, inside the run-to-run spread). Absolute figures move with
+  machine load, which is why all three arms were measured in one interleaved run.
+
+  **SciPy remains a hard dependency**, so `pip install opik-rigor` continues to
+  give a working `assert_no_regression`. Mann-Whitney U is *not* reimplemented:
+  SciPy's carries the tie-averaged ranks and the cached exact null distribution
+  that make the p-value trustworthy, and this suite has no independent oracle for
+  a p-value — `tests/test_distribution.py` hand-counts the U statistic but asserts
+  only `p_value < 1e-4`, which it describes as generous. A reimplementation would
+  ship with nothing able to catch it being wrong.
+
+  **No gate's verdict changes, and that was proved rather than assumed.**
+  `NormalDist().inv_cdf` was swept against `norm.ppf` over 6,401,023 points of the
+  open interval (0, 1) — a dense uniform grid, log-spaced approaches to both
+  endpoints down to `5e-324` and `nextafter(1.0, 0.0)`, uniform random draws,
+  random raw bit patterns across every exponent band, and every confidence a
+  caller would plausibly type. Maximum absolute deviation 2.84e-14, maximum
+  relative deviation 1.22e-15, maximum 8 ULP. Propagated through `_wilson` over
+  87,486 one- and two-sided bounds the worst deviation *shrinks* to 3.33e-16.
+  `_runs_needed`, which answers in whole runs, changed **0 of 72,814** answers.
+  Across **1,443,519** combinations of confidence x successes x n x `min_rate`,
+  **0** verdicts flip.
+
+  **The one real residual, stated rather than hidden.** The last ULP of a
+  full-precision float in an evidence log can move:
+  `wilson_lower_bound(18, 20)` was `0.7383369536731331` and is now
+  `0.7383369536731332`. Every number this package *prints* is formatted to four
+  decimals, so every failure message is byte-identical — the README's pasted
+  `PassRateError` example reproduces character for character, and a test pins the
+  formatted form. A consumer diffing raw `lower_bound` floats between 0.1.1 and
+  this release at full `repr` precision may see a final-digit difference; one
+  comparing them at any tolerance, or reading the printed report, will not.
+
+- **The underpowered pass-rate message no longer reads as a power calculation,
+  because it never was one.** It said "At this observed rate roughly N runs would
+  clear the bar", which is true only if the next N runs reproduce the observed
+  rate exactly — and they land above or below it at random. The exact binomial
+  probability that a fresh sample of the recommended size clears the gate is
+  **0.66** at the 113 recommended above, 0.54 at 613 and 0.59 at 42: a coin flip
+  presented as a budget, and the same defect class a sibling project found by
+  simulation when it certified n=25 adequate at a real power of 33.9%. The message
+  now states the recommendation, says in terms that it is arithmetic on one rate
+  rather than a power calculation, and quotes the power alongside it.
+
+- **The `ModelPinError` message now names the clause that refused the id**, and
+  quotes worked examples that are themselves pinned. The old message instructed
+  the reader to add a date suffix, which for a current Anthropic id produces an id
+  that does not exist — advice that is confidently wrong. A test now asserts that
+  every example the message quotes satisfies `is_pinned`, so that class of untrue
+  advice fails the suite rather than relying on someone proof-reading it.
+
+### Added
+
+- **`numpy>=1.21` is now a declared dependency.** It always was one in fact:
+  `distribution.py` imports NumPy directly, and `assert_score_distribution`'s
+  public docstring pins `mean`, `p10` and `stddev` to NumPy's exact semantics
+  (`numpy.mean`, `numpy.percentile` with linear interpolation,
+  `numpy.std(ddof=1)`). It worked only because SciPy pulls NumPy transitively —
+  an edge that disappears the moment SciPy ever moves behind an extra. No
+  environment is newly excluded: `scipy>=1.10` already requires `numpy>=1.19.5`.
+
+- **`tests/test_import_cost.py`** — asserts, in fresh subprocesses, that
+  `import opik_rigor` and the pass-rate and distribution gates load no `scipy`
+  module, that `assert_no_regression` does, that NumPy is declared and SciPy is in
+  no extra, that the stdlib quantile matches `norm.ppf` (which is now available as
+  an *independent* oracle, since `src/` no longer uses it), and that the formatted
+  bound the README prints is unchanged.
+
+- **A named error when SciPy is missing.** Deferring the import makes a
+  scipy-free environment fail inside `assert_no_regression` rather than at
+  `import opik_rigor`, where a bare `ModuleNotFoundError: No module named 'scipy'`
+  would read as a bug in this package. It now names what is missing, which gate
+  wanted it, why the test is not reimplemented, how to install it, and that the
+  other two gates keep working without it. It is still a `ModuleNotFoundError`
+  chained to the original, so `except ImportError` around the call still catches
+
+- **A genuinely powered recommendation beside the arithmetic one.** The report
+  dict gains `power_at_runs_needed`, `target_power` (0.80) and
+  `runs_for_target_power`, and the failure message offers the last of these as
+  "the number to plan against" — 188 rather than 113 in the case above, 1.5-2.2x
+  larger across the grid. It is derived, not asserted: the power is the exact
+  binomial probability that `Binomial(n, observed)` reaches the smallest count
+  clearing the Wilson bound, computed in the standard library from a log-gamma
+  seed and a multiplicative recurrence over a 14-sigma window, and the tests
+  recompute every reported figure in exact `Fraction` arithmetic over the whole
+  tail. The recommendation is the point past which the power *stays* at or above
+  the target, for the same lattice reason `_runs_needed` reports a stable point:
+  164 is the first n to reach 80% and 165-187 fall back below it.
+
+- **`pinning.PINNED_EXAMPLES`** — the worked examples the `ModelPinError` message
+  quotes, exposed so that a caller, and the test suite, can check the advice
+  against the predicate instead of against a proof-read.
+
+**On the pin rule and compatibility.** No signature changed and nothing was
+renamed. Every model id 0.1.1 accepted is still accepted **except `gpt-4.1`**,
+which it should not have accepted. Ids that were refused and are now accepted
+cannot break a caller, because the only thing `require_pinned` ever did with them
+was raise.
 
 ## [0.1.1] - 2026-08-13
 
