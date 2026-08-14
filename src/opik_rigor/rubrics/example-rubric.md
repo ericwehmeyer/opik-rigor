@@ -51,15 +51,11 @@ regardless of its other qualities.
 
 ## Output format
 
-Answer with a single JSON object and nothing else, in exactly this form:
+Nothing goes here, on purpose. `PinnedJudge` appends the response-format
+instruction to the prompt itself — `PROMPT_TEMPLATE` ends in `{output_format}` —
+so a rubric that restates it puts the same block in the rendered prompt twice.
+If you want to read the exact wording the judge model receives, it is
+`opik_rigor.judge.OUTPUT_FORMAT_INSTRUCTION`.
 
-{"pass": true, "score": 4, "reason": "one sentence naming the deciding criterion"}
-
-- "pass" is required and must be the JSON boolean true or false, never a string.
-- "score" must be a number from 1 to 5, or null if the
-  rubric gives you no basis to score. Do not invent a number and do not answer
-  outside that range.
-- "reason" is one sentence.
-Do not wrap the object in commentary. If you are unsure, say so in the reason
-rather than answering in prose -- an unparseable answer is discarded, which is
-safer than a guess.
+Write your own rubric the way this one is written: criteria and a scale, and
+nothing about JSON.

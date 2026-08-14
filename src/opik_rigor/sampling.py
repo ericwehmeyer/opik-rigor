@@ -48,6 +48,15 @@ class Run:
         return self.error is not None
 
 
+def _short_repr(value: Any, limit: int = 60) -> str:
+    """``repr(value)`` clipped, so a 4kB completion cannot become the message."""
+    try:
+        text = repr(value)
+    except Exception:  # noqa: BLE001 - a broken __repr__ must not replace the real error
+        return f"<unreprable {type(value).__name__}>"
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
 def default_outcome(value: Any) -> bool:
     """Decide whether one returned value counts as a pass.
 
@@ -56,6 +65,14 @@ def default_outcome(value: Any) -> bool:
     refuses anything else. Truthiness is not used on purpose: a non-empty string
     of judge prose is truthy, and silently scoring it as a pass would manufacture
     a measurement out of an unparsed response.
+
+    The refusal is right and the message has to carry its own consequences,
+    because of where it lands. :func:`sample` stores it on ``Run.error``, the same
+    field a provider outage lands in, and :attr:`SampleResult.completed` filters
+    those runs out -- so an adapter that answered every prompt correctly reports
+    ``pass_rate=0.0`` beside ``failures=0`` and empty ``.values``. The message
+    therefore names the value, says where the runs went, and gives the one-line
+    fix rather than only stating the rule.
     """
     if isinstance(value, bool):
         return value
@@ -63,9 +80,14 @@ def default_outcome(value: Any) -> bool:
     if isinstance(passed, bool):
         return passed
     raise TypeError(
-        f"cannot decide pass/fail from {type(value).__name__}; return a bool or an "
-        f"object with a boolean .passed attribute, or pass an explicit "
-        f"outcome=... callable to sample()"
+        f"cannot decide pass/fail from {type(value).__name__} {_short_repr(value)}; "
+        f"sample() records this run as errored, which drops it from .values, "
+        f".outcomes, .successes and .completed -- so a whole sample of these reads "
+        f"as pass_rate=0.0 beside failures=0, which looks like an outage rather "
+        f"than an unanswered question. Return a bool or an object with a boolean "
+        f".passed attribute, or pass an explicit outcome=... callable to sample(). "
+        f"If you have no pass/fail question yet and only want the values back, say "
+        f"so with outcome=lambda value: True."
     )
 
 
@@ -98,8 +120,29 @@ class SampleResult:
         return tuple(run for run in self.runs if not run.raised)
 
     @property
-    def exceptions(self) -> tuple[Run, ...]:
+    def errored_runs(self) -> tuple[Run, ...]:
+        """The runs that raised -- :class:`Run` objects, not exceptions.
+
+        The exception itself is ``run.error``, so the line a caller usually wants
+        is ``[str(run.error) for run in result.errored_runs]``.
+        """
         return tuple(run for run in self.runs if run.raised)
+
+    @property
+    def exceptions(self) -> tuple[Run, ...]:
+        """Deprecated alias of :attr:`errored_runs`, kept working forever.
+
+        The name is wrong and always was: it returns :class:`Run` objects, so
+        ``[str(e) for e in result.exceptions]`` yields run reprs rather than error
+        messages, silently. Prefer :attr:`errored_runs`, which says what it hands
+        back.
+
+        No :class:`DeprecationWarning` is emitted. This attribute is read inside
+        loops and inside every consumer's assertions, and a warning there buys a
+        wall of test output rather than a fix; the two names are the same tuple,
+        so nothing is at risk while a caller migrates.
+        """
+        return self.errored_runs
 
     @property
     def successes(self) -> int:

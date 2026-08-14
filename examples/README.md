@@ -45,8 +45,10 @@ bad makes them meaningless. This one has a specific, plausible, *invisible*
 failure — the summary still reads well — which is precisely the kind an eval has
 to catch.
 
-**A judge that is pinned and imperfect.** `PinnedJudge` grades against
-`rubrics/example-rubric.md`, refuses an aliased model id at construction time,
+**A judge that is pinned and imperfect.** `PinnedJudge` grades against the
+example rubric that ships inside the package (`opik_rigor.example_rubric_path()`,
+so this example reads exactly the file a `pip install` gives you), refuses an
+aliased model id at construction time,
 and records the sha256 of the rubric so a later edit cannot silently move the
 scale. Its answers come from a seeded `FakeAdapter` whose scripted verdicts are
 chosen *per tier of summary* — complete, reason missing, caveat missing — so the

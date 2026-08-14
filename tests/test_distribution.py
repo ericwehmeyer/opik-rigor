@@ -796,6 +796,56 @@ def test_a_missing_baseline_is_not_a_passing_comparison() -> None:
         assert_no_regression([1.0, 2.0], [])
 
 
+def test_a_sample_of_text_is_told_its_data_is_the_wrong_shape_not_that_it_is_absent() -> None:
+    # Roadmap item 14. `.scores()` harvests getattr(run.value, "score", None), so
+    # a sample of plain completions harvests nothing -- and "current has no
+    # scores" reads as "you have no data" to a caller holding 200 of them. The
+    # message has to name the type it found and the first value that caused it.
+    runs = tuple(
+        Run(index=index, value=value, outcome=True)
+        for index, value in enumerate(("Paris", "Berlin", "Rome"))
+    )
+    current = SampleResult(runs=runs, wall_clock=0.0)
+
+    with pytest.raises(ValueError) as excinfo:
+        assert_no_regression(current, [4.0, 4.5, 5.0])
+
+    message = str(excinfo.value)
+    assert "current has no scores" in message  # the old opening survives
+    assert "SampleResult" in message  # what it actually is
+    assert "3 runs" in message  # it is not empty
+    assert "str" in message and "'Paris'" in message  # the first offending value
+
+
+def test_a_sample_whose_runs_all_raised_is_told_that_rather_than_told_it_is_empty() -> None:
+    # The other way a SampleResult yields no scores: nothing completed at all.
+    # Naming the first error is the difference between "wrong shape" and "the
+    # provider was down", which call for opposite responses.
+    runs = tuple(
+        Run(index=index, error=RuntimeError(f"upstream 503 #{index}")) for index in range(4)
+    )
+    current = SampleResult(runs=runs, wall_clock=0.0)
+
+    with pytest.raises(ValueError) as excinfo:
+        assert_no_regression(current, [4.0, 4.5, 5.0])
+
+    message = str(excinfo.value)
+    assert "4 runs" in message
+    assert "every one of them raised" in message
+    assert "RuntimeError: upstream 503 #0" in message
+
+
+def test_a_genuinely_empty_input_still_gets_the_plain_message() -> None:
+    # The diagnosis must not be bolted onto the case where "you have no data" is
+    # simply true; an empty list is exactly what the original sentence describes.
+    with pytest.raises(ValueError) as excinfo:
+        assert_no_regression([], [1.0, 2.0])
+
+    assert str(excinfo.value) == (
+        "current has no scores; there is nothing to compare against baseline."
+    )
+
+
 def test_sample_results_feed_the_regression_gate() -> None:
     current = sample_of_judge_scores([1.0, 2.0, 3.0, 4.0])
     baseline = sample_of_judge_scores([5.0, 6.0, 7.0, 8.0])

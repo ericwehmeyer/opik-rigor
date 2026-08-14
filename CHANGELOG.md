@@ -5,6 +5,98 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Seven gaps closed, all of them reported by the first external consumer against
+the published 0.1.0 wheel rather than found by reading this repository. Every
+change is **additive**: nothing is renamed, no signature rejects a call it used
+to accept, and no gate's verdict moves. A consumer pinned to `>=0.1.0,<0.2` can
+take this release without reading it.
+
+### Added
+
+- **`py.typed`.** The library is annotated throughout and shipped no PEP 561
+  marker, which means a type checker had to discard every one of those
+  annotations in an installed copy. One empty file, and a test asserts it is
+  inside the built wheel rather than merely inside the tree.
+- **`SCORE_MIN`, `SCORE_MAX`, `hash_rubric_file` and `hash_rubric_text` are
+  exported from the package root** and are in `__all__`. They were public in
+  spirit and unreachable in practice: a consumer that imputes a score for an
+  ungradeable response has to know where the bottom of the scale is, and one that
+  hashes a judge config has to hash the rubric exactly as rigor does or the two
+  disagree about whether the instrument changed. Re-deriving either — a
+  hard-coded `1.0`, a hand-rolled sha256 — is the drift this library exists to
+  catch, so reaching into `opik_rigor.judge` was the only honest option and it
+  should not have been necessary.
+- **`SampleResult.errored_runs`**, the correctly named accessor for the runs that
+  raised. `SampleResult.exceptions` returns the same tuple and keeps working
+  exactly as before; it is documented as deprecated and emits **no**
+  `DeprecationWarning`, because that attribute is read inside loops and inside
+  every downstream assertion, and a warning there buys a wall of test output
+  rather than a migration.
+- **The example rubric ships inside the package**, at
+  `opik_rigor/rubrics/example-rubric.md`, reachable as
+  `opik_rigor.example_rubric_path()`. `pip install opik-rigor` previously gave you
+  a `PinnedJudge` and nothing to point it at, while the README linked a file that
+  only existed in the repository.
+
+### Changed
+
+- **`hash_rubric_text` accepts `str` as well as bytes.** The name says "text", so
+  refusing text was a trap — and passing a `str` failed several lines in on the
+  function's own `b"\r\n"` literal with `TypeError: replace() argument 1 must be
+  str, not bytes`, a message describing the exact inverse of the caller's
+  mistake. A `str` is encoded as UTF-8 and hashed identically; anything that is
+  neither text nor bytes is now refused at the boundary, by name, with a pointer
+  to `hash_rubric_file` for the argument people actually reach for.
+- **`assert_no_regression` says which shape the data is, not just that there is
+  none.** "current has no scores" reads as *you have no data* to a caller holding
+  two hundred completions, when the truth is that `SampleResult.scores()` harvests
+  `getattr(run.value, "score", None)` and a sample of plain strings harvests
+  nothing. The message now names the type it was given, how many runs it holds,
+  and the first offending value — or, when every run raised, the first error. What
+  the gate *accepts* is unchanged, and a genuinely empty input still gets the
+  original sentence.
+- **The default classifier's refusal explains where the runs went.**
+  `default_outcome` correctly refuses to guess whether `"Paris"` is a pass, but
+  `sample` files that refusal on `Run.error` — the field a provider outage lands
+  in — and `SampleResult.completed` filters those runs out. An adapter that
+  answered every prompt correctly therefore reported `pass_rate=0.0` beside
+  `failures=0` with empty `.values`, which reads as a total outage. The message
+  now names the value, states that the run has been dropped from `.values`,
+  `.outcomes`, `.successes` and `.completed`, and gives the one-line fix
+  (`outcome=lambda value: True` if you only want the values back). **The
+  behaviour itself is unchanged and pinned by a test** — letting `outcome=None`
+  mean "do not classify", or splitting classifier errors out of `Run.error`,
+  changes what a recorded sample means and is a major-version change, not this
+  one.
+- **The example rubric no longer restates the response format.** It used to end
+  with `OUTPUT_FORMAT_INSTRUCTION` verbatim, on the reasoning that a rubric should
+  read as a whole prompt on its own — but `PROMPT_TEMPLATE` already appends that
+  block, so anyone starting from the example shipped the format instructions to
+  the model twice. The instruction belongs to the library and the criteria belong
+  to the rubric; a test now pins that the rendered prompt contains it exactly once.
+  The file moved from `rubrics/example-rubric.md` to inside the package, so its
+  sha256 changed. That cannot reach an installed consumer — 0.1.0's wheel carried
+  no rubric, so no installed copy of rigor can have recorded the old hash — but a
+  checkout that graded against the repository file will raise `RubricDriftError`
+  on its next run, which is the mechanism working. Acknowledge it with
+  `accept_rubric_change=True`, or keep your own copy of the old file.
+
+### Not fixed, and why
+
+- **`SampleResult.completed` still filters out a run whose classifier raised**, so
+  the "total outage" reading above is still reachable by anyone who does not read
+  the message. Every fix — a fourth outcome state, a separate field for classifier
+  errors, or `outcome=None` meaning "do not classify" — changes the meaning of a
+  recorded sample and of `pass_rate`, and a consumer reading `.stats` off a raised
+  gate would silently get different verdicts. It waits for 0.2.
+- **The `Adapter` protocol still exposes no token usage**, so no cost gate is
+  possible without reaching past the seam into a provider SDK. Adding
+  `complete_with_usage` to the protocol is additive for adapters but not for
+  anything that type-checks against `Adapter`; it is a 0.2 item alongside the
+  typed report objects.
+
 ## [0.1.0] - 2026-08-13
 
 First release. Two primitives — statistical gates and a pinned judge — plus the

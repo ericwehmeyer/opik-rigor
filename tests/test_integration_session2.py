@@ -32,12 +32,12 @@ from opik_rigor import (
     assert_no_regression,
     assert_pass_rate,
     assert_score_distribution,
+    example_rubric_path,
     sample,
 )
 from opik_rigor.evidence import EVENT_ASSERTION, EVENT_JUDGE_VERDICT, EVENT_SAMPLE_COMPLETED
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-RUBRIC = REPO_ROOT / "rubrics" / "example-rubric.md"
+RUBRIC = example_rubric_path()
 
 #: Seeds are fixed and named so a failure can be reproduced exactly. Changing one
 #: changes the observed pass rate, which is the point: these numbers are measured
