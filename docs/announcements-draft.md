@@ -1,6 +1,34 @@
 # Announcement drafts
 
-Drafts only. Nothing here has been posted anywhere. Edit freely before use.
+Drafts only. **Nothing here has been posted anywhere.** Edit freely before use.
+
+## State, as of 2026-08-13
+
+| Draft | State |
+|---|---|
+| 1. Opik post | **on hold — no venue.** Discussions disabled on `comet-ml/opik`; no community channel in their `CONTRIBUTING.md`. See the note on that section. |
+| 2. LinkedIn post | **rewritten, ready.** Unposted. |
+| 3. README badge row | **applied** to `README.md` at the 0.1.0 release. |
+
+### Why the LinkedIn post was rewritten
+
+The first version opened on the method — four sessions, plan-first, role
+separation — and never said what the library actually does until its
+second-to-last line. Every fact in it was correct; the ordering was wrong for a
+feed, where a reader decides in two lines whether to keep going.
+
+The rewrite leads with the concrete result instead: 18/20 and 900/1000 are both
+90%, only one is evidence, and neither clears a 90% gate. That states what the
+tool is for before asking anyone to care how it was built, and the method story
+lands better as the second beat because the attention has been earned. Length and
+register are unchanged — under 200 words, no hype adjectives, no emoji.
+
+Facts re-verified at rewrite time: both Wilson bounds, the count of bugs found by
+authorship separation (three, all in code the author had written or specified),
+the test count, and the install command. One claim from the original was
+deliberately dropped rather than carried over — that a specific provider alias
+re-pointed on a specific date. Aliases re-pointing is true by definition and is
+the argument; that particular event was illustrative and was never verified.
 
 ---
 
@@ -50,30 +78,30 @@ https://github.com/ericwehmeyer/opik-rigor
 
 ## 2. LinkedIn post
 
-I built a small Python library over four sessions, and the method is the
-interesting part.
+18 of 20 evals passed. 900 of 1000 passed. Both are 90%.
 
-The plan came first: module contracts, session boundaries, and a test inventory
-used as the acceptance contract, all written and approved before any code
-existed. It is committed verbatim, including the parts it got wrong.
+Only one of those is evidence — and neither of them clears a 90% gate. A lower
+confidence bound approaches the observed rate from below and never reaches it,
+so you have to beat the bar, not hit it. How much headroom you need is exactly
+what sample size buys you.
 
-Then role separation — the agent that wrote a module never wrote its tests. The
-test author derived expected Wilson bounds independently, by root-finding the
-inequality that defines the interval, instead of checking the implementation
-against itself.
+I wrote opik-rigor to make that the default. It gates on the Wilson lower bound
+rather than the observed rate, and it pins the LLM judge doing the grading to one
+exact model version and one hashed rubric revision — because an aliased model id
+re-points over time, and scores from either side of that are not comparable.
 
-That separation caught three real bugs, one of them a lower confidence bound
-that came out above its own point estimate at zero successes. A fourth bug —
-three tests asserting a property of the environment, not of the library — was
-caught by an environment change, not by the separation.
+Four sessions, the plan approved before any code, and one rule that mattered more
+than the rest: the agent that wrote a module never wrote its tests. Expected
+values came from root-finding the definition of the interval, not from running
+the implementation and trusting what came back.
 
-Why single-shot assertions fail on non-deterministic systems: one run of 20 is a
-sample, not a property, so a green test has told you about 20 coin flips rather
-than about the system.
+That caught three real bugs. All three were in code I had written or specified.
+One of them was a lower confidence bound that came out above its own point
+estimate.
 
-The library gates and pins; it is not an eval platform. 514 tests pass offline
-with no credentials. On PyPI: pip install opik-rigor
+514 tests, no credentials, no network.
 
+pip install opik-rigor
 https://github.com/ericwehmeyer/opik-rigor
 
 ---
