@@ -53,6 +53,41 @@ rigor = "opik_rigor.integrations.pytest_plugin"
 [tool.hatch.build.targets.wheel]
 packages = ["src/opik_rigor"]
 
+# An allowlist, not a denylist, and that choice is the point.
+#
+# With no sdist target declared at all, hatchling falls back to "everything the
+# repository holds that .gitignore does not exclude". The agent worktrees and the
+# session-memory directory are excluded in `.git/info/exclude`, which hatchling
+# does not read -- so `python -m build` on this machine produced a 122-member
+# sdist, 71 members of which were a second full copy of the tree under
+# `.claude/worktrees/` plus 25 `.remember/` files. The published 0.1.1 sdist is
+# clean at 47 members only because CI builds from a fresh checkout where those
+# directories do not exist. That is protection by accident of environment, and it
+# fails the moment anyone builds a release locally.
+#
+# A denylist would fix today's two directories and miss whatever tool creates the
+# next one. An allowlist fails the other way -- by omitting something needed --
+# and that direction is already caught: `verify_release.py`'s `sdist-contents`
+# check looks for missing content, and nothing looked for surplus content until
+# `tests/test_packaging.py` gained a test for it alongside this.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/docs",
+  "/examples",
+  "/scripts",
+  "/.github",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/COMPATIBILITY.md",
+  "/PROGRESS.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/.gitignore",
+  "/.gitattributes",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
