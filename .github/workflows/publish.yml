@@ -38,6 +38,26 @@ jobs:
       - run: python -m pip install --upgrade pip build twine
       - run: python -m build
       - run: python -m twine check dist/*
+      # `twine check` passed the 0.1.0 wheel, which shipped no py.typed, no
+      # packaged rubric, and no package data in the sdist. It validates metadata
+      # and long-description rendering; it never opens the zip. This does.
+      #
+      # The editable install is load-bearing, not hygiene: `distribution.py`
+      # imports scipy at module scope, so the isolated `-E -S` probe cannot
+      # import the extracted wheel without the dependencies present -- and a
+      # probe that cannot import reports FAIL, not skip. Editable specifically,
+      # because it puts nothing named `opik_rigor` into site-packages, so the
+      # probe's "no other sys.path entry holds an opik_rigor" evidence stays
+      # true. Installed after the build so no editable artefact reaches the
+      # sdist.
+      - run: python -m pip install -e .
+      # No --allow-dev-version here, deliberately. On this workflow the
+      # version-not-dev check is the one that earns its keep: it is the last
+      # gate before an artifact is uploaded to an index that will never let the
+      # filename be reused.
+      - run: python scripts/verify_release.py --no-build
+      # Upload last, so a downloadable `dist` only ever exists for a build that
+      # passed verification.
       - uses: actions/upload-artifact@v7
         with:
           name: dist
