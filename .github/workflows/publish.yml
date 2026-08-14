@@ -50,7 +50,19 @@ jobs:
       # probe's "no other sys.path entry holds an opik_rigor" evidence stays
       # true. Installed after the build so no editable artefact reaches the
       # sdist.
-      - run: python -m pip install -e .
+      #
+      # The `[typecheck]` extra is the rest of that same argument, and it is here
+      # because leaving it out failed this workflow on v0.2.0 while CI was green.
+      # `wheel-annotations` runs `mypy --strict` against the extracted wheel to
+      # establish that the `py.typed` marker is telling a downstream checker the
+      # truth. With no mypy the row SKIPS, and a skip is exit 2 -- correctly, since
+      # a gate that cannot run has not passed -- so the publish jobs never fire and
+      # the release looks broken rather than unverified. `ci.yml` learned this
+      # first and carried the extra; this workflow did not, which is the same
+      # shape as every other defect in this repository's release history: a check
+      # that passes where it was written and fails only where it matters. The two
+      # workflows install the same extra now.
+      - run: python -m pip install -e ".[typecheck]"
       # No --allow-dev-version here, deliberately. On this workflow the
       # version-not-dev check is the one that earns its keep: it is the last
       # gate before an artifact is uploaded to an index that will never let the
