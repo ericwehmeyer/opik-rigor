@@ -7,8 +7,105 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet. The two items under *Not fixed, and why* below are queued for 0.2,
-which is where this project puts changes that alter what a recorded sample means.
+Import cost, and the dependency that was never declared. Both changes are
+**additive**: nothing is renamed, no signature rejects a call it used to accept,
+and no gate's verdict moves. The items under *Not fixed, and why* below remain
+queued for 0.2, which is where this project puts changes that alter what a
+recorded sample means.
+
+### Changed
+
+- **`import opik_rigor` no longer imports SciPy** — 1018.6 ms of warm import
+  becomes 247.2 ms, and `assert_pass_rate` 1070.6 ms becomes 251.0 ms, against a
+  ~40 ms interpreter floor. `distribution.py` imported
+  `from scipy.stats import mannwhitneyu, norm` at module scope, and `__init__.py`
+  imports from that module, so every consumer paid for all of `scipy.stats` — and
+  with it `scipy.optimize`, `scipy.spatial`, `scipy.sparse` and `scipy.linalg`.
+  This package registers a `pytest11` entry point, so the cost landed at
+  *collection*, on every pytest run in a project that has it installed.
+
+  Two changes, and both were needed. `mannwhitneyu` moved inside
+  `assert_no_regression`, its only caller. The Wilson `z` now comes from
+  `statistics.NormalDist().inv_cdf` — CPython's Wichura AS241, stdlib since 3.8,
+  and this package already requires >= 3.10 — rather than `scipy.stats.norm.ppf`.
+  Deferring the SciPy import *alone* does almost nothing, and the measurement is
+  worth stating because the failure is invisible from the obvious benchmark. Timed
+  interleaved against a tree with both scipy names deferred but the Wilson z still
+  on `norm.ppf` (warm, min of 20, ms):
+
+  ```
+  scenario                              BEFORE   LAZY-ONLY      AFTER
+  interpreter floor                       36.6        39.3       45.3
+  import opik_rigor                     1018.6       213.4      247.2
+  import + assert_pass_rate             1070.6      1096.7      251.0
+  import + assert_score_distribution    1320.5       248.6      247.9
+  import + assert_no_regression         1143.8      1048.1     1023.2
+  ```
+
+  The lazy-only tree's *import* looks fixed at 213.4 ms, and then its
+  `assert_pass_rate` costs 1096.7 ms — no better than the 1070.6 ms it replaced,
+  because `norm.ppf` sits on the pass-rate path and the first gate call triggers
+  the import the module just deferred. The pass-rate and score-distribution gates
+  are now off SciPy entirely; the regression gate still pays the full import on
+  first call, which is the one caller that needs it, and is unchanged
+  (1143.8 → 1023.2 ms, inside the run-to-run spread). Absolute figures move with
+  machine load, which is why all three arms were measured in one interleaved run.
+
+  **SciPy remains a hard dependency**, so `pip install opik-rigor` continues to
+  give a working `assert_no_regression`. Mann-Whitney U is *not* reimplemented:
+  SciPy's carries the tie-averaged ranks and the cached exact null distribution
+  that make the p-value trustworthy, and this suite has no independent oracle for
+  a p-value — `tests/test_distribution.py` hand-counts the U statistic but asserts
+  only `p_value < 1e-4`, which it describes as generous. A reimplementation would
+  ship with nothing able to catch it being wrong.
+
+  **No gate's verdict changes, and that was proved rather than assumed.**
+  `NormalDist().inv_cdf` was swept against `norm.ppf` over 6,401,023 points of the
+  open interval (0, 1) — a dense uniform grid, log-spaced approaches to both
+  endpoints down to `5e-324` and `nextafter(1.0, 0.0)`, uniform random draws,
+  random raw bit patterns across every exponent band, and every confidence a
+  caller would plausibly type. Maximum absolute deviation 2.84e-14, maximum
+  relative deviation 1.22e-15, maximum 8 ULP. Propagated through `_wilson` over
+  87,486 one- and two-sided bounds the worst deviation *shrinks* to 3.33e-16.
+  `_runs_needed`, which answers in whole runs, changed **0 of 72,814** answers.
+  Across **1,443,519** combinations of confidence x successes x n x `min_rate`,
+  **0** verdicts flip.
+
+  **The one real residual, stated rather than hidden.** The last ULP of a
+  full-precision float in an evidence log can move:
+  `wilson_lower_bound(18, 20)` was `0.7383369536731331` and is now
+  `0.7383369536731332`. Every number this package *prints* is formatted to four
+  decimals, so every failure message is byte-identical — the README's pasted
+  `PassRateError` example reproduces character for character, and a test pins the
+  formatted form. A consumer diffing raw `lower_bound` floats between 0.1.1 and
+  this release at full `repr` precision may see a final-digit difference; one
+  comparing them at any tolerance, or reading the printed report, will not.
+
+### Added
+
+- **`numpy>=1.21` is now a declared dependency.** It always was one in fact:
+  `distribution.py` imports NumPy directly, and `assert_score_distribution`'s
+  public docstring pins `mean`, `p10` and `stddev` to NumPy's exact semantics
+  (`numpy.mean`, `numpy.percentile` with linear interpolation,
+  `numpy.std(ddof=1)`). It worked only because SciPy pulls NumPy transitively —
+  an edge that disappears the moment SciPy ever moves behind an extra. No
+  environment is newly excluded: `scipy>=1.10` already requires `numpy>=1.19.5`.
+
+- **`tests/test_import_cost.py`** — asserts, in fresh subprocesses, that
+  `import opik_rigor` and the pass-rate and distribution gates load no `scipy`
+  module, that `assert_no_regression` does, that NumPy is declared and SciPy is in
+  no extra, that the stdlib quantile matches `norm.ppf` (which is now available as
+  an *independent* oracle, since `src/` no longer uses it), and that the formatted
+  bound the README prints is unchanged.
+
+- **A named error when SciPy is missing.** Deferring the import makes a
+  scipy-free environment fail inside `assert_no_regression` rather than at
+  `import opik_rigor`, where a bare `ModuleNotFoundError: No module named 'scipy'`
+  would read as a bug in this package. It now names what is missing, which gate
+  wanted it, why the test is not reimplemented, how to install it, and that the
+  other two gates keep working without it. It is still a `ModuleNotFoundError`
+  chained to the original, so `except ImportError` around the call still catches
+  it — the improvement is the text, not a new exception type to handle.
 
 ## [0.1.1] - 2026-08-13
 

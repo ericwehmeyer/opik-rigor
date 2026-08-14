@@ -114,6 +114,16 @@ the output is pasted verbatim. Nothing here is illustrative.
 pip install opik-rigor
 ```
 
+**What that pulls in.** opik-rigor's own code is 0.33 MB. It requires NumPy and
+SciPy, which come to **180.6 MB on disk** between them (numpy 2.5.2 and scipy
+1.18.0 on CPython 3.14/Windows, counting the `numpy.libs` and `scipy.libs`
+directories that carry the bundled BLAS/LAPACK). NumPy is used by every gate.
+SciPy is used by exactly one function — `assert_no_regression`, for
+`scipy.stats.mannwhitneyu` — and is imported on first call rather than at package
+import, so a suite that never calls that gate never loads SciPy and does not pay
+for it at import time. Both stay required, so `pip install opik-rigor` continues
+to give you a working `assert_no_regression`.
+
 A worked example rubric ships **inside the package**, so the install gives you
 something to point the judge at:
 

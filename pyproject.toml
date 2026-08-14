@@ -23,7 +23,18 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Testing",
 ]
-dependencies = ["scipy>=1.10"]
+# numpy is declared even though scipy pulls it transitively: distribution.py imports
+# it directly, and assert_score_distribution's public docstring pins mean, p10 and
+# stddev to numpy's exact semantics (numpy.mean, numpy.percentile linear
+# interpolation, numpy.std(ddof=1)). An undeclared direct import is a dependency
+# that exists only by accident, and the accident ends the moment scipy moves behind
+# an extra. >=1.21 is where the numpy.typing surface and the current scalar type
+# names settled; scipy>=1.10 already requires >=1.19.5.
+#
+# scipy stays a hard dependency, not an extra: assert_no_regression imports it
+# lazily but still needs it, and `pip install opik-rigor` must keep working for
+# that gate. Moving it behind an extra is a breaking change and waits for 0.2.
+dependencies = ["numpy>=1.21", "scipy>=1.10"]
 
 [project.optional-dependencies]
 # Bounds justified in COMPATIBILITY.md: the surface was verified against 2.2.28,
