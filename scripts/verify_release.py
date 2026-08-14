@@ -516,7 +516,9 @@ def readme_package_symbols(text: str, package: str = IMPORT_NAME) -> list[str]:
 # --------------------------------------------------------------------------------------
 
 
-def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed argv, no shell
         cmd,
         cwd=str(cwd) if cwd else None,
@@ -524,7 +526,21 @@ def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
+
+
+#: A CSI escape sequence. Stripped from any subprocess output this script parses.
+#: Not cosmetic: `twine check` prints a bare `PASSED` on a Windows dev shell and a
+#: colour-wrapped `\x1b[32mPASSED\x1b[0m` on GitHub Actions, so a check that looked
+#: for the word at end of line passed everywhere it was written and failed the
+#: first time it ran where it counts.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def plain_lines(text: str) -> list[str]:
+    """Non-empty lines with any terminal colouring removed."""
+    return [_ANSI_RE.sub("", line) for line in text.splitlines() if line.strip()]
 
 
 def tail(text: str, limit: int = 12) -> list[str]:
@@ -1440,8 +1456,17 @@ def check_twine(sdist: Path, wheel: Path, repo: Path) -> Result:
                 "PyPI's own rendering check is therefore UNVERIFIED, not passed",
             ],
         )
-    proc = run([sys.executable, "-m", "twine", "check", str(sdist), str(wheel)], cwd=repo)
-    lines = [line for line in (proc.stdout + proc.stderr).splitlines() if line.strip()]
+    # NO_COLOR so twine emits the plain word, and the ANSI strip below in case a
+    # future twine ignores it. Belt and braces on purpose: this check reads
+    # another tool's human-facing output, which is not an interface anybody
+    # promised to keep stable, and its whole value is that it fails loudly rather
+    # than counting wrong.
+    proc = run(
+        [sys.executable, "-m", "twine", "check", str(sdist), str(wheel)],
+        cwd=repo,
+        env={**os.environ, "NO_COLOR": "1", "FORCE_COLOR": "0"},
+    )
+    lines = plain_lines(proc.stdout + proc.stderr)
     passed = sum(1 for line in lines if line.strip().endswith("PASSED"))
     evidence = [f"checked: {sdist.name}, {wheel.name}", *lines]
     if proc.returncode != 0:

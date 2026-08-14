@@ -246,6 +246,50 @@ def test_dependency_paths_are_deduplicated():
     assert vr.dependency_paths([entry, entry]) == [entry]
 
 
+# ----------------------------------------------------------------------------------
+# Reading another tool's human-facing output
+# ----------------------------------------------------------------------------------
+
+
+def test_a_colourised_twine_pass_is_still_counted():
+    """The exact bytes GitHub Actions produced, which the check read as zero passes.
+
+    `check_twine` counts lines ending in `PASSED`. `twine check` prints a bare
+    `PASSED` on a Windows dev shell and a colour-wrapped one on CI, so the line
+    ends in `\\x1b[0m` there and the count came out 0 -- a FAIL on a build that was
+    fine. It passed on every machine it was written on and failed the first time it
+    ran where it counts. Note the wrapped first line: twine breaks the path across
+    lines too, so the word is not on the line that starts with `Checking`.
+    """
+    captured = (
+        "Checking \n"
+        "/home/runner/work/opik-rigor/opik-rigor/dist/"
+        "opik_rigor-0.1.1-py3-none-any.whl: \x1b[32mPASSED\x1b[0m\n"
+        "Checking /home/runner/work/opik-rigor/opik-rigor/dist/"
+        "opik_rigor-0.1.1.tar.gz: \x1b[32mPASSED\x1b[0m\n"
+    )
+    lines = vr.plain_lines(captured)
+    assert sum(1 for line in lines if line.strip().endswith("PASSED")) == 2
+    assert "\x1b" not in "".join(lines)
+
+
+def test_a_plain_twine_pass_is_unchanged():
+    """The uncoloured form still has to count, or the strip fixed CI and broke every
+    developer machine instead."""
+    captured = "Checking dist/opik_rigor-0.1.1-py3-none-any.whl: PASSED\n"
+    assert vr.plain_lines(captured) == ["Checking dist/opik_rigor-0.1.1-py3-none-any.whl: PASSED"]
+
+
+def test_a_failure_is_not_turned_into_a_pass_by_stripping():
+    """`FAILED` must survive the same treatment. A strip that ate the distinction
+    would make this check report success on a broken artifact, which is worse than
+    the defect it was written to fix."""
+    captured = "Checking dist/x.whl: \x1b[31mFAILED\x1b[0m\n  `long_description` is missing\n"
+    lines = vr.plain_lines(captured)
+    assert sum(1 for line in lines if line.strip().endswith("PASSED")) == 0
+    assert lines[0].endswith("FAILED")
+
+
 def _probe(tmp_path):
     return vr.Probe(extract=tmp_path / "wheel-extract", workdir=tmp_path, deps=[])
 
