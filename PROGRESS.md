@@ -289,6 +289,47 @@ Item 9 (no token usage on the `Adapter` seam) is likewise still open, for the sa
 reason: adding `complete_with_usage` to the protocol is additive for adapters but
 not for code that type-checks against `Adapter`.
 
+### 16. `is_pinned` rejects every current frontier Anthropic model id
+
+Found on 2026-08-13, hours after 0.1.1 shipped, by an agent designing a *third*
+consumer — not by reading this repository. Verified against the published 0.1.1
+wheel in a clean venv:
+
+```
+claude-opus-5                      is_pinned=False
+claude-sonnet-5                    is_pinned=False
+claude-opus-4-8                    is_pinned=False
+claude-haiku-4-5-20251001          is_pinned=True
+gpt-4o                             is_pinned=False
+gpt-4o-2024-08-06                  is_pinned=True
+claude-3-7-sonnet-20250219         is_pinned=True
+```
+
+The rule requires a date suffix. Anthropic's current ids do not carry one, so the
+only Anthropic models `require_pinned` accepts are the ones that still use the old
+dated spelling — and `claude-3-7-sonnet-20250219`, which it happily accepts, was
+**retired on 2026-02-19**. The check therefore admits a model that no longer
+exists and refuses every model a caller would actually reach for. `require_pinned`
+is called at config load in the consumers that use it, so this is not a warning
+they can route around; it refuses to start.
+
+This is worse than an inconvenience, because the library's argument is that an
+unpinned alias silently invalidates a calibration. That argument is right. The
+implementation encodes a *proxy* for it — "has a date in the name" — and the proxy
+has stopped tracking the thing it stood for. A vendor changed its naming
+convention and rigor's gate started measuring spelling instead of stability.
+
+The fix is not simply to widen the regex, and that is why this is not a one-liner:
+`claude-opus-5` genuinely *is* an alias that can be re-pointed, so accepting it
+would make `is_pinned` a lie in the other direction. The honest options are a
+per-provider rule set, an explicit allow-list the caller supplies, or separating
+"syntactically pinned" from "the caller asserts this is pinned" so the assertion is
+recorded in the evidence log rather than inferred from a string. Each changes what
+a recorded pin *means*, so this waits for **0.2** alongside items 8 and 9.
+
+Until then, the workaround is to not call `require_pinned` on Anthropic ids, which
+is a bad workaround and is stated here so nobody rediscovers it at midnight.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
