@@ -167,3 +167,73 @@ def _clean_env() -> dict[str, str]:
     import os
 
     return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+
+# ----------------------------------------------------------------------------------
+# The sdist: what must NOT be in it
+# ----------------------------------------------------------------------------------
+
+#: Path fragments that must never appear in a source distribution. Each is a
+#: directory some tool creates inside the checkout and nobody intends to publish.
+#: `.claude/worktrees` holds a full second copy of the tree; `.remember` holds
+#: session memory, which is conversational content rather than source.
+FRAGMENTS_THE_SDIST_MUST_NOT_CARRY = (".claude", ".remember", ".venv", "node_modules")
+
+
+@pytest.fixture(scope="session")
+def built_sdist(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build an sdist from this checkout and return the path to it."""
+    if not PYPROJECT.is_file():
+        pytest.skip(f"not a source checkout ({PYPROJECT} does not exist)")
+    if importlib.util.find_spec("build") is None:
+        pytest.skip(
+            "the `build` package is not installed, so the sdist contents are "
+            "UNVERIFIED -- install the dev extra (`pip install -e '.[dev]'`)"
+        )
+
+    outdir = tmp_path_factory.mktemp("sdist")
+    command = [sys.executable, "-m", "build", "--sdist", "--outdir", str(outdir)]
+    if importlib.util.find_spec("hatchling") is not None:
+        command.append("--no-isolation")
+
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        pytest.fail(
+            f"`{' '.join(command)}` failed with exit {result.returncode}\n"
+            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+        )
+
+    archives = sorted(outdir.glob("*.tar.gz"))
+    assert len(archives) == 1, f"expected exactly one sdist in {outdir}, got {archives}"
+    return archives[0]
+
+
+@pytest.mark.parametrize("fragment", FRAGMENTS_THE_SDIST_MUST_NOT_CARRY)
+def test_the_sdist_carries_nothing_from_the_working_directory(built_sdist: Path, fragment: str):
+    """The sdist must not sweep in directories that only exist while working here.
+
+    Every other packaging check in this file asks whether something the package
+    promised is *present*. Nothing asked whether something nobody promised had
+    been included, and that asymmetry shipped a real defect: with no
+    ``[tool.hatch.build.targets.sdist]`` declared, hatchling fell back to
+    "everything ``.gitignore`` does not exclude", and these directories are
+    excluded in ``.git/info/exclude``, which hatchling does not read. A local
+    ``python -m build`` produced a 122-member sdist of which 71 members were a
+    second full copy of the tree under ``.claude/worktrees/`` plus 25
+    ``.remember/`` files.
+
+    The published 0.1.1 sdist is clean, verified by downloading it: CI builds from
+    a fresh checkout where none of these directories exist. That is the point of
+    this test. The artifact was safe by accident of the build environment, and an
+    accident is not a guarantee -- the first release built on a developer's
+    machine would have published the lot.
+    """
+    import tarfile
+
+    with tarfile.open(built_sdist) as archive:
+        offenders = [name for name in archive.getnames() if fragment in name]
+
+    assert offenders == [], (
+        f"the sdist contains {len(offenders)} member(s) under {fragment!r}, which is "
+        f"working-directory content and not source. First few: {offenders[:5]}"
+    )

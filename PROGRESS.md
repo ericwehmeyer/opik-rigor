@@ -330,6 +330,174 @@ a recorded pin *means*, so this waits for **0.2** alongside items 8 and 9.
 Until then, the workaround is to not call `require_pinned` on Anthropic ids, which
 is a bad workaround and is stated here so nobody rediscovers it at midnight.
 
+### 17. `import opik_rigor` costs a second, for a gate most suites never call
+
+Found on 2026-08-14 by measuring the published 0.1.1 install rather than by reading
+the tree — the friction is invisible in source, because the import that causes it is
+one perfectly ordinary line. `src/opik_rigor/distribution.py:33` imported
+`from scipy.stats import mannwhitneyu, norm` at module scope, and `__init__.py`
+imports from that module, so `import opik_rigor` pulled in all of `scipy.stats` —
+which drags `scipy.optimize`, `scipy.spatial`, `scipy.sparse` and `scipy.linalg`
+behind it.
+
+The cost is paid by every suite that imports the package, including the
+overwhelming majority that only ever call `assert_pass_rate`. It is worse than a
+one-off: this library registers a `pytest11` entry point, so the import happens at
+*collection*, before a single test runs, on every pytest invocation in a project
+that has it installed — including invocations of test files that never touch it.
+A consumer running the gate in a pre-commit hook pays it on every commit.
+
+**What the fix is not, and this is the whole point.** `mannwhitneyu` has exactly
+one call site, so deferring the scipy import into `assert_no_regression` looks like
+the whole answer. It is not. `norm.ppf` has three call sites — `wilson_lower_bound`,
+`wilson_interval` and `_runs_needed` — and the first of those sits directly on the
+pass-rate path, the most-used gate in the package. A lazy import that the first gate
+call immediately triggers is not a lazy import.
+
+That is measurable rather than arguable. Three trees were timed **interleaved**, so
+background load hit all three equally — `BEFORE` (main @ `df93f43`), `LAZY-ONLY`
+(both scipy names deferred into functions, but the Wilson z still `norm.ppf`), and
+`AFTER` (this branch). Warm, minimum of 20 runs, milliseconds:
+
+```
+scenario                              BEFORE   LAZY-ONLY      AFTER
+interpreter floor                       36.6        39.3       45.3
+import opik_rigor                     1018.6       213.4      247.2
+import + assert_pass_rate             1070.6      1096.7      251.0
+import + assert_score_distribution    1320.5       248.6      247.9
+import + assert_no_regression         1143.8      1048.1     1023.2
+```
+
+Read the `LAZY-ONLY` column downward. Its bare import is fast — 213.4 ms, the fix
+apparently working — and then `assert_pass_rate` costs **1096.7 ms**, no better than
+the 1070.6 ms it was trying to improve on, because the gate imports the scipy the
+module just finished not importing. `assert_score_distribution`, which never touches
+`norm.ppf`, *is* genuinely fixed at 248.6 ms. So the half-fix does not merely
+under-deliver; it moves the cost from a place you would measure to a place you would
+not, and leaves the single most-called gate exactly where it was.
+
+**The fix, and it is additive.** `statistics.NormalDist().inv_cdf` is CPython's
+implementation of Wichura's AS241, in the standard library since 3.8; this package
+already requires >= 3.10. Replacing `norm.ppf` with it *and* moving `mannwhitneyu`
+inside `assert_no_regression` takes warm import from 1018.6 ms to 247.2 ms against a
+~40 ms interpreter floor, and — the part that matters — takes `assert_pass_rate`
+from 1070.6 ms to 251.0 ms. The absolute figures move with machine load; the columns
+above were measured against each other in one interleaved run for exactly that
+reason. `assert_no_regression` is unchanged (1143.8 → 1023.2 ms, a difference inside
+the run-to-run spread): it still pays the full SciPy import on first call, which is
+the one caller that should.
+Nothing is renamed, no signature rejects a call it used to accept, and no gate's
+verdict moves — the equivalence evidence is in CHANGELOG.md and in
+`tests/test_import_cost.py`. **So this does not wait for 0.2, and it shipped
+additively.**
+
+**Two adjacent changes do wait for 0.2, and the ordering matters.** The obvious
+next moves are an `opik-rigor[regression]` extra that takes SciPy out of the base
+install, and dropping NumPy so the base install is stdlib-only. Both are runtime
+breaks: `pip install opik-rigor` followed by `assert_no_regression` would raise
+where it used to work, and this project's convention — written down before 0.1.1
+shipped, and relied on by a consumer pinned `>=0.1.0,<0.2` — is that `0.MINOR`
+means breaking. The ordering matters in the other direction too: item 17 had to
+land *first*, and additively, because it is what makes the extra worth having.
+Without it, `opik-rigor[regression]` would remove a dependency the base install
+still imports at module scope, which is not a smaller install but a broken one.
+Deferring the import is the prerequisite; moving the dependency is the follow-on.
+Do them in that order, one release apart, and no consumer is ever caught between.
+
+### 18. NumPy is imported and never declared
+
+Found the same day, by reading `pyproject.toml` next to the file that imports.
+`dependencies` listed only `scipy>=1.10`, while `distribution.py:32` imported
+`numpy as np` at module scope and used it in `_coerce_pass_data`, `_coerce_scores`
+and every score summary. The public docstring around `distribution.py:604-608`
+goes further and pins the reported statistics to NumPy's exact semantics: **mean**
+is `numpy.mean`, **p10** is `numpy.percentile` with NumPy's default *linear*
+interpolation, **stddev** is `numpy.std(ddof=1)`. That is a documented promise
+about a library the package never said it needed.
+
+It worked only because SciPy requires NumPy transitively. That is an accident, not
+a contract — and it is exactly the accident item 17's follow-on destroys: the day
+SciPy moves behind an extra, a base install has no NumPy, and `import opik_rigor`
+fails on a line nobody changed. **Declaring it is additive and shipped with item
+17** (`numpy>=1.21`, where the current scalar type names and `numpy.typing`
+surface settled; `scipy>=1.10` already requires `>=1.19.5`, so no existing
+environment is excluded). `tests/test_import_cost.py` asserts the declaration is
+there, and asserts SciPy is absent from every extra, so the 0.2 change has to be
+deliberate.
+
+**Removing NumPy is the part that waits for 0.2**, and it waits on test debt
+rather than on the calendar. A prototype that replaced it with `statistics` and
+`math` passed the entire suite and still silently broke `np.bool_`, `np.integer`
+and `np.float32` acceptance in `_coerce_pass_data` and `_coerce_scores` — inputs
+that arrive routinely from array code and CSV round-trips, and that **no test
+covers**. Until those coercion paths have tests that would notice, dropping NumPy
+is a change whose regression nothing in this repository can catch, which is the
+one kind of change this project does not make.
+
+### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model
+
+Found on 2026-08-14 by a coordinating agent reading Anthropic's own migration
+reference against `src/opik_rigor/adapters/anthropic.py`, and confirmed here by
+reading the call shape rather than by spending a credential. The adapter passes
+`temperature` on every request:
+
+```python
+# src/opik_rigor/adapters/anthropic.py:96-101
+message = client.messages.create(
+    model=self._model_id,
+    max_tokens=self._max_tokens,
+    temperature=self._temperature,          # constructor default 0.0, line 50
+    messages=[{"role": "user", "content": prompt}],
+)
+```
+
+`temperature`, `top_p` and `top_k` were **removed** on Claude Opus 5, Opus 4.8,
+Opus 4.7, Sonnet 5 and Fable 5: sending any of them returns a **400**. On Sonnet 5
+the rule is narrower — a *non-default* value returns 400 — and the API default is
+`1.0`, so this adapter's `0.0` is non-default and 400s there too. There is no
+configuration a caller can supply that avoids it: `temperature` has no sentinel
+meaning "omit", the constructor validates `0.0 <= temperature <= 1.0` and so
+rejects `None`, and the parameter is passed unconditionally. **Every call this
+adapter makes to a current Anthropic model fails at the API boundary.** It fails
+loudly at least — `complete()` wraps provider exceptions, so the caller sees
+`AdapterError: anthropic call failed for model 'claude-opus-5': BadRequestError:
+...` rather than a wrong answer — but it fails on every call.
+
+**This is worse than item 16, and the two compound.** Item 16 is a gate that
+*refuses to start* with a current model id; a consumer can route around it by not
+calling `require_pinned`, which is a bad workaround but is a workaround. This one
+is at the API call itself, so routing around the gate buys a 400 instead of a
+judgement. **Both must be fixed before rigor works with any current Anthropic
+model** — fixing either alone leaves the library unable to judge with anything
+Anthropic currently serves. Item 16 is the front door being locked; item 19 is
+there being no room behind it.
+
+**Why this is recorded rather than implemented.** The obvious fix — omit
+`temperature` when the model id looks current — is a runtime behaviour change on a
+published adapter, and it is not purely internal: the constructor validates the
+range and the class exposes a `temperature` property, both of which are public
+surface a consumer may read. The honest options:
+
+* **Omit when unset, honour when set** — give `temperature` a `None` default
+  meaning "do not send", keep the validation for explicitly-passed values, and
+  keep the property (returning `None`). This is *additive*: no existing call is
+  rejected, and a caller who passed `0.0` explicitly against an older model keeps
+  getting `0.0`. It changes the default's behaviour, which is the part that needs
+  argument — but the current default's behaviour is a 400, so nothing that works
+  today stops working.
+* **Per-model parameter rules** — a table of which models accept which sampling
+  parameters, so the adapter sends what the target actually supports. Correct, and
+  it acquires the same maintenance problem item 16 has: a vendor changes its
+  surface and the table silently stops tracking it.
+* **Drop the parameter entirely** — smallest code, and it removes a public
+  property and a constructor keyword. That is breaking, and waits for 0.2.
+
+The first option looks additive enough to ship before 0.2, and is the recommended
+one; it needs a test that asserts the key is *absent* from the request payload,
+not merely that the call succeeds. Deciding between it and the per-model table is
+the open question, and it is deliberately left open here rather than settled in a
+branch whose subject is import cost.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
