@@ -74,7 +74,7 @@ What else is on `main` and not on PyPI:
   was protection by accident of environment, and it is now an allowlist plus a
   test.
 
-#### Awaiting decision — 0.2.0 is staged, unpushed, 2026-08-14
+#### 0.2.0 — PUBLISHED to PyPI 2026-08-14, from tag `v0.2.0` (`6928124`)
 
 **The version question above is answered: 0.2.0.** `confidence <= 0.5` removes an
 input that used to be accepted and answered, and this project reserved 0.2 for
@@ -84,8 +84,24 @@ is now a consequence rather than an objection: `model-migration-kit` pins
 which is deliberate — the pin holds until somebody reads the breaking change and
 moves it on purpose.
 
-Everything below is done and verified locally. **Nothing has been pushed and
-nothing has been published.**
+**Verified from outside, against the published wheel rather than this tree** — a
+clean venv, `pip install --no-cache-dir opik-rigor`, `__version__` and installed
+metadata both `0.2.0`:
+
+| Claim | Result against the published artifact |
+|---|---|
+| `assert_pass_rate((20,20), 1.0, confidence=0.5)` | `ValueError` |
+| `wilson_lower_bound(20,20,0.5)` and `(20,20,0.3)` | `ValueError` |
+| `wilson_interval(18,20,0.3)` still answers | `(0.8711, 0.923)` |
+| `wilson_lower_bound(38,40,0.95)` unmoved | `0.859668178434` |
+| `is_pinned("claude-opus-5")` / `is_pinned("gpt-4.1")` | `True` / `False` |
+
+**One trap worth recording: the first post-publish `pip install` returned 0.1.1.**
+The upload had succeeded 22 seconds earlier and PyPI's JSON API already listed
+0.2.0; pip had been served a cached simple-index page. A clean install a minute
+later resolved 0.2.0. **A stale install immediately after publishing is not
+evidence the publish failed** — query
+`https://pypi.org/pypi/opik-rigor/json` before believing the installer.
 
 | Step | State |
 |---|---|
@@ -93,13 +109,14 @@ nothing has been published.**
 | `CHANGELOG.md` 0.2.0 section, breaking change leading | done |
 | `COMPATIBILITY.md` records the outward contract change | done |
 | `README.md` version-dependent claims re-scoped | done |
-| `docs/release-notes-0.2.0.md` drafted | done |
-| Full suite | **1046 passed, 11 skipped, 1 xfailed** (`pytest tests examples`) |
-| Release gate | **17 passed, 0 failed, 0 flagged** (`scripts/verify_release.py`) |
-| Artifacts in `dist/` + `twine check` | built, both PASSED |
-| Annotated tag `v0.2.0` | created locally, **not pushed** |
+| `docs/release-notes-0.2.0.md` — used as the GitHub release body | done |
+| Full suite | **1049 passed, 11 skipped, 1 xfailed** (`pytest tests examples`) |
+| Release gate, locally and in CI | **17 passed, 0 failed, 0 flagged** |
+| CI matrix on the released commit | 8/8 cells green |
+| TestPyPI rehearsal (`workflow_dispatch`) | published |
+| **PyPI** (`release: published`) | **published, verified by clean install** |
 
-**The command sequence to fire it** (each step is yours, not the loop's):
+**The sequence that actually published it**, for the next release to follow:
 
 ```bash
 git push origin main            # publishes the commit
@@ -107,6 +124,23 @@ git push origin v0.2.0          # publishes the tag -- this alone publishes NOTH
 gh release create v0.2.0 --title "v0.2.0" \
   --notes-file docs/release-notes-0.2.0.md --verify-tag
 ```
+
+**If the release event fires against a bad commit, re-publish rather than
+re-run.** 0.2.0's first release event ran before the `publish.yml` fix existed
+and failed. A workflow re-run is pinned to the *original* head SHA, so it would
+have re-run the same broken workflow; moving the tag does not change that. What
+works is to draft and re-publish the release, which fires
+`release: published` afresh and re-resolves the tag:
+
+```bash
+gh release edit v0.2.0 --draft          # fires nothing
+gh release edit v0.2.0 --draft=false    # fires release:published against the tag now
+```
+
+This is gentler than `gh release delete` + re-create: the release keeps its
+identity and there is no window where it does not exist. Verify with
+`gh run list --workflow=publish.yml` that the new run's `headSha` is the commit
+you meant.
 
 **Pushing the tag does not publish.** `publish.yml` triggers on
 `release: types: [published]` and on `workflow_dispatch` — never on a tag push. A
