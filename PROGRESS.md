@@ -74,6 +74,39 @@ What else is on `main` and not on PyPI:
   was protection by accident of environment, and it is now an allowlist plus a
   test.
 
+#### What to do next, in order
+
+1. **Decide the version number.** `confidence <= 0.5` is the only non-additive
+   change. 0.1.2 says "bug fix"; 0.2.0 says "we removed accepted inputs". The
+   consumer (`model-migration-kit`) pins `>=0.1.1,<0.2`, so **0.2.0 would not
+   reach it without a bound change there** — which is an argument for 0.1.2 and
+   also exactly the kind of argument that should be made deliberately rather than
+   by default.
+2. **Ship it.** The two Anthropic blockers are both fixed on `main` and neither is
+   published, so today `pip install opik-rigor` still cannot judge with a current
+   model. That is the strongest reason to cut a release soon.
+3. **Note the README problem.** PyPI freezes the long description at upload, so
+   0.1.1's project page keeps its old README — including the dead
+   `examples/summarise_eval.py` command — until a new version goes up. It does not
+   self-heal.
+4. Items 20 and 21 below are open and neither blocks a release.
+
+#### Three lessons this session, all the same shape
+
+A check that passes where it was written and fails only where it matters:
+
+- `twine check`'s output is **colourised under GitHub Actions**, so a gate
+  counting lines ending in `PASSED` counted zero on a healthy build.
+- Two tests hardcoded a Windows path; on POSIX `Path(r"C:\x\site-packages").name`
+  is the whole string, so four Ubuntu cells failed while Windows passed. The
+  sibling had the mirror-image failure the same night.
+- `wheel-annotations` ran `mypy --strict` over a wheel containing
+  `import pytest`, in a build job that did not install pytest.
+
+Each was invisible locally. The general form is worth stating: **an expectation
+can quietly encode the environment of whoever wrote it**, and the only instrument
+that finds that is running it somewhere else.
+
 ## Session 1 — module status
 
 | Module | State | Tests |
