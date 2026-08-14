@@ -805,6 +805,47 @@ docstring is wrong and should stop advertising the path, or `scores()` should
 accept plain numbers, which widens a public method's contract. That is a decision,
 not a typo.
 
+### 22. At one float below 1.0, `wilson_lower_bound` answers and `assert_pass_rate` crashes
+
+Found 2026-08-14 by the consumer's test author, working from the contract rather
+than from this code, while pinning migration-kit's confidence floor to this one.
+Reproduced against the **published 0.2.0 wheel**, not this tree:
+
+```python
+c = math.nextafter(1.0, 0.0)          # 0.9999999999999999
+wilson_lower_bound(18, 20, c)         # -> 0.18588465718870917
+assert_pass_rate((18, 20), 0.8, confidence=c)
+# statistics.StatisticsError: p must be in the range 0.0 < p < 1.0
+```
+
+`_validate_gating_confidence` accepts the value — correctly, it is inside `(0.5,
+1)`. The one-sided `z = ppf(c)` is fine at 8.2095. The two-sided path is not:
+`wilson_interval` takes `z = ppf((1 + c) / 2)`, and `(1 + c) / 2` **rounds to
+exactly 1.0** for this value, so `inv_cdf` is handed a probability of 1 and
+raises. `assert_pass_rate` reports the two-sided interval alongside the one-sided
+bound, which is why it crashes where `wilson_lower_bound` does not.
+
+The band is exactly one float wide: at `0.9999999999999998` the transform no
+longer rounds to 1.0. So this is not operator-reachable and is not a release
+blocker. Three things make it worth writing down anyway:
+
+1. **`StatisticsError` subclasses `ValueError`**, so a caller cannot distinguish
+   "you passed a bad confidence" from "the library broke" — and this module's
+   whole argument for refusing `confidence <= 0.5` is that a refusal should say
+   what the caller did wrong. The message names `p`, a parameter no caller
+   supplied.
+2. **Two public functions disagree about one input**, which no test asserts
+   against, because every test picks confidences a person would type.
+3. It was found by the role separation rather than by this project: the test
+   author had been told to pin the two libraries' boundaries to each other, and a
+   sweep across the range found the disagreement that neither side's own tests
+   look for.
+
+Not fixed here and deliberately not hot-fixed into 0.2.0: nothing reaches it, and
+a release cut for it would cost a version number for an input no one can type by
+accident. The fix when it comes is a clamp in the two-sided `z`, and it belongs
+with a test that sweeps the top of the range rather than sampling it.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
