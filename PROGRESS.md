@@ -154,6 +154,19 @@ here rather than worked around in the caller, per the dependency-direction rule.
    nothing. Options: let `outcome=None` mean "do not classify" and leave
    `Run.outcome` as `None` without an error, or keep classifier errors in a
    separate field from call errors so the two are never confused.
+10. **Two names every judging consumer needs are not public.** `SCORE_MIN` /
+    `SCORE_MAX` and `hash_rubric_file` live in `opik_rigor.judge` and appear in no
+    `__all__` and no document, so migration-kit reaches into a submodule to get
+    them — a violation of its own "public API only" invariant, committed by the
+    same author who wrote the invariant, and found by a mechanical grep rather
+    than by review. The need is unavoidable rather than incidental: a consumer
+    that must impute a score for an ungradeable response has to know what the
+    bottom of the scale *is*, and one that hashes a judge config has to hash the
+    rubric the same way rigor does or the two disagree about whether the
+    instrument changed. Re-deriving either in the consumer is worse than the
+    import: a hard-coded `1.0` silently becomes wrong the day the scale changes,
+    which is exactly the class of drift this library exists to catch. Fix in 0.2
+    by exporting all three from the package root.
 9. **The `Adapter` seam exposes no usage data.** `complete(prompt) -> str` is the
    whole protocol, so a caller that wants token counts — for a cost gate, or for
    the "what did this verdict cost" line in a report — cannot get them without
