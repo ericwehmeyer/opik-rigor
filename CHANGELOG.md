@@ -16,7 +16,8 @@ Ten defects, and they are not ten faults — they are **one fault, ten times: a
 claim that is true of the source tree and false of the artifact a user
 installs**, which is the sentence this changelog already used once, for 0.1.0's
 rubric. The worked example the quickstart ends on is the first entry under
-**Added**; the rest are the last nine entries under **Fixed**.
+**Added**, the release check that would have caught it is the second, and the
+remaining nine defects are the last nine entries under **Fixed**.
 
 **None of the documentation work reaches an existing release.** A project's long
 description is frozen at upload time, so the page PyPI renders for 0.1.1 is the
@@ -24,8 +25,8 @@ old README — dead links, elided hashes, an unrunnable example — and stays th
 until a new version is uploaded. Those fixes reach readers with the next version,
 not before.
 
-The first of the numerical reviews was adversarial, working by derivation rather than by
-reading this code: bisection on the score-test inequality, exact `Fraction`
+The first of the numerical reviews was adversarial, working by derivation rather
+than by reading this code: bisection on the score-test inequality, exact `Fraction`
 arithmetic, and full brute-force scans. It confirmed that the Wilson bounds are
 exact to 2.2e-16 across 105 grid points, that nothing anywhere conflates
 one-sided with two-sided, that the pass-rate gate never gates on the point
