@@ -24,6 +24,7 @@ it is a reconstruction.
 | 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
 | — | Publish | **v0.1.0 published to PyPI 2026-08-13** — `pip install opik-rigor` |
 | 5 | Phase 3: close the consumer-reported API gaps, additively | **complete** — items 10–15 and item 8's message closed; 534 passed offline / 543 with opik |
+| — | Release 0.1.1 | **prepared, not released** — branch `release/0.1.1`, 537 passed offline; see [Releasing 0.1.1](#releasing-011--what-is-prepared-and-what-remains) |
 
 ## Session 1 — module status
 
@@ -322,6 +323,92 @@ regression against a number that was never measured that way. One test was
 rewritten rather than added — `test_shipped_rubric_ends_with_the_output_format_the_judge_parses`
 became `test_the_shipped_rubric_states_the_output_format_exactly_once`, asserting
 the inverse, because the thing it pinned turned out to be the bug.
+
+## Releasing 0.1.1 — what is prepared, and what remains
+
+Prepared on branch `release/0.1.1`, up to but not including the tag. Nothing has
+been tagged, pushed, released, or uploaded.
+
+What is done: the version is `0.1.1` in `pyproject.toml` and in
+`src/opik_rigor/__init__.py`, which must always move together because
+`test_every_public_name_is_importable_from_the_package_root` compares
+`__version__` against install-time metadata. `CHANGELOG.md` closes the section as
+`## [0.1.1] - 2026-08-13`, with `[Unreleased]` and `[0.1.1]` link definitions that
+previously did not exist — a bracketed reference with no definition renders as
+literal text on GitHub and on PyPI, which is what `[Unreleased]` had been doing.
+`tests/test_packaging.py` is new: it builds a wheel into a temporary directory and
+reads the zip, because the earlier py.typed assertion read
+`Path(opik_rigor.__file__).parent`, which under an editable install is `src/` —
+the source tree, i.e. exactly the thing the changelog sentence claimed it was not.
+
+Measured on a throwaway venv holding this branch (Python 3.14.4):
+`pytest tests examples` → **537 passed, 11 skipped**; `ruff check src tests
+examples` clean; `python -m build` and `twine check dist/*` clean; and the built
+wheel verified by installing it alone into a second empty virtualenv and importing
+from there, which is the only arrangement in which the developer's own `src/`
+cannot answer on the wheel's behalf.
+
+**0.1.1 is new public API in a PATCH release, deliberately.** The reasoning is in
+the changelog under the version heading; the short form is that this file reserved
+0.2 for items 8 and 9 in writing, and the only known consumer pinned
+`>=0.1.0,<0.2` on that reading.
+
+**Ship it rather than sit on it.** `main` currently documents
+`opik_rigor.example_rubric_path()` in the README quickstart, and the only
+installable version is 0.1.0, which has no such function. That window opened when
+`11da812` merged and closes when 0.1.1 is on the index. (The *published* 0.1.0
+README does not mention it — that page has its own, older instance of the same
+fault, recorded in the changelog.)
+
+### The trusted-publisher registrations already exist. Do not redo them.
+
+Both were created for 0.1.0 and are bound to owner, repository, workflow filename
+and environment name — none of which change for a second release from the same
+repository: `ericwehmeyer/opik-rigor`, `publish.yml`, and the environments `pypi`
+and `testpypi`, which already exist too. Commit `2c7cd46` records that trusted
+publishing took three attempts, all for one cause: PyPI and TestPyPI are separate
+sites needing separate registrations with a different environment name each. That
+cause is spent. A *pending* publisher is consumed by the first successful upload
+and correctly leaves nothing to re-create, so its absence from the PyPI UI is not
+evidence that anything is missing — the publisher is now attached to the project.
+Re-registering "to be safe" is superstition. If an upload ever fails at the auth
+step again, the fault is a name that *changed*, not one that is missing.
+
+### Steps remaining, in order
+
+1. **Review and merge `release/0.1.1` into `main`.** Terminal, or a PR in a
+   browser if you want CI to run on the merge candidate.
+2. **Confirm CI is green on `main`** across the 3.10–3.13 × Ubuntu/Windows matrix.
+   *Browser* (GitHub Actions), or `gh run list`.
+3. **Tag the merge commit `v0.1.1` and push the tag.** Terminal. The tag alone
+   publishes nothing — `publish.yml` triggers on a *published release*, not on a
+   tag push. Do not tag anything but the exact commit CI went green on.
+4. **Optional dry run: dispatch `Publish` manually to reach TestPyPI.** *Browser*
+   (Actions → Publish → Run workflow), or `gh workflow run publish.yml`. The two
+   upload jobs are gated on the event, so a dispatch physically cannot reach the
+   real index. This rehearsal is what caught the environment-name mistake before
+   0.1.0's irreversible run; it is cheap and it is the reason 0.1.0 was still
+   unclaimed when the real upload first failed.
+5. **Create and publish the GitHub Release for `v0.1.1`.** *Browser* (Releases →
+   Draft a new release). Body: the `## [0.1.1]` section of `CHANGELOG.md`.
+   **Publishing the release is the irreversible act** — it is what starts the
+   upload. A version can be yanked but its number can never be reused, so a wrong
+   0.1.1 ships as 0.1.2.
+6. **Watch the `publish to PyPI` job.** *Browser*. Its first step refuses to
+   upload if the release tag and the built wheel's version disagree; `v0.1.1`
+   against `version = "0.1.1"` satisfies it, and that step failing means the tag
+   is wrong, not the guard.
+7. **Verify from the real index, not from this tree.** In a clean virtualenv:
+   `pip install opik-rigor==0.1.1`, then check that `example_rubric_path()`
+   returns a file inside site-packages, that `py.typed` sits beside `__init__.py`,
+   and that `SCORE_MIN` and `hash_rubric_file` import from the package root.
+8. **Retire the sibling's violation.** `model-migration-kit` reaches into
+   `opik_rigor.judge` for `SCORE_MIN` and `hash_rubric_file` because 0.1.0 offered
+   no other route. Repoint it at the package root and move its pin to
+   `>=0.1.1,<0.2`. This release exists largely for that, so it is not done until
+   this is done.
+9. **Record the publish here**, as the `v0.1.0` row above records its own, and
+   move `[Unreleased]`'s compare link forward if anything lands after the tag.
 
 ## Decisions made, and why
 

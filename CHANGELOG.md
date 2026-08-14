@@ -7,18 +7,43 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Nothing yet. The two items under *Not fixed, and why* below are queued for 0.2,
+which is where this project puts changes that alter what a recorded sample means.
+
+## [0.1.1] - 2026-08-13
+
 Seven gaps closed, all of them reported by the first external consumer against
 the published 0.1.0 wheel rather than found by reading this repository. Every
 change is **additive**: nothing is renamed, no signature rejects a call it used
 to accept, and no gate's verdict moves. A consumer pinned to `>=0.1.0,<0.2` can
-take this release without reading it.
+take this release without reading it. One more defect was found while preparing
+the release, by reading the artifact on PyPI instead of the tree, and is the first
+entry under **Fixed**.
+
+**New public API in a PATCH release is a deliberate deviation from strict
+SemVer.** Strict SemVer makes any addition to the public API a MINOR bump, which
+would put this at 0.2.0. This project instead adopted `0.MINOR = breaking` in
+writing before this release existed: `PROGRESS.md` records items 8 and 9 as
+waiting for 0.2 precisely because they change what a recorded sample means, and
+the only known consumer pinned itself `>=0.1.0,<0.2` on that reading. Publishing
+purely additive work as 0.2.0 would lock that consumer out of a release that
+cannot break it, in order to honour a rule about a number. So the additions ship
+as 0.1.1, and the reservation of 0.2 stands.
 
 ### Added
 
 - **`py.typed`.** The library is annotated throughout and shipped no PEP 561
   marker, which means a type checker had to discard every one of those
-  annotations in an installed copy. One empty file, and a test asserts it is
-  inside the built wheel rather than merely inside the tree.
+  annotations in an installed copy. One empty file — and `tests/test_packaging.py`
+  builds a wheel into a temporary directory and reads the zip's namelist for it,
+  rather than reading the source tree, because a marker sitting in the tree is
+  exactly the state 0.1.0 shipped from while its wheel carried nothing. The same
+  file checks `opik_rigor/rubrics/example-rubric.md`, and imports the public names
+  out of the *extracted* wheel while asserting that `opik_rigor.__file__` really
+  resolved there — a developer's own `src/` answers otherwise, and the check would
+  pass against an empty wheel. `build` and `hatchling` join the `dev` extra so it
+  runs rather than skips; where they are absent it skips with a message naming what
+  went unverified.
 - **`SCORE_MIN`, `SCORE_MAX`, `hash_rubric_file` and `hash_rubric_text` are
   exported from the package root** and are in `__all__`. They were public in
   spirit and unreachable in practice: a consumer that imputes a score for an
@@ -37,18 +62,35 @@ take this release without reading it.
 - **The example rubric ships inside the package**, at
   `opik_rigor/rubrics/example-rubric.md`, reachable as
   `opik_rigor.example_rubric_path()`. `pip install opik-rigor` previously gave you
-  a `PinnedJudge` and nothing to point it at, while the README linked a file that
-  only existed in the repository.
+  a `PinnedJudge` and nothing to point it at — and this is worth stating as the
+  admission it is rather than as an addition. **0.1.0's own published README told
+  an installed user to "save a rubric as `rubric.md` (the one in
+  `rubrics/example-rubric.md`)", and the 0.1.0 wheel does not contain that file.**
+  Verified against the artifact rather than the tree: the description baked into
+  `opik_rigor-0.1.0-py3-none-any.whl` on PyPI is exactly that sentence, and the
+  wheel's twenty-one entries include no rubric and no `examples/`. A published
+  document instructing a reader to use something their installed copy does not
+  have is the precise defect class `COMPATIBILITY.md` exists to record in other
+  people's libraries; the first one this project shipped was its own.
+- **`opik_rigor.judge.EXAMPLE_RUBRIC_NAME`**, the filename of that packaged rubric
+  (`"example-rubric.md"`), documented so it can be found in a wheel listing without
+  running Python. It is deliberately **not** re-exported at the package root and
+  **not** in `__all__`. `example_rubric_path()` is the supported way to reach the
+  file; a root-level export would promise the *filename* as API and invite callers
+  to rebuild the path out of it, which is the re-derivation this library exists to
+  catch. `SCORE_MIN` and `hash_rubric_file` were lifted to the root because a
+  consumer had no other way to get at what they mean — this constant has one, so
+  the argument that moved those does not carry it. Named here rather than left
+  undocumented because it is public by position whether or not it is advertised.
 
 ### Changed
 
 - **`hash_rubric_text` accepts `str` as well as bytes.** The name says "text", so
-  refusing text was a trap — and passing a `str` failed several lines in on the
-  function's own `b"\r\n"` literal with `TypeError: replace() argument 1 must be
-  str, not bytes`, a message describing the exact inverse of the caller's
-  mistake. A `str` is encoded as UTF-8 and hashed identically; anything that is
-  neither text nor bytes is now refused at the boundary, by name, with a pointer
-  to `hash_rubric_file` for the argument people actually reach for.
+  refusing text was a trap. A `str` is encoded as UTF-8 and hashed identically to
+  the same bytes, so the two spellings cannot disagree about whether a rubric
+  changed; anything that is neither text nor bytes is now refused at the boundary,
+  by name, with a pointer to `hash_rubric_file` for the argument people actually
+  reach for. What the old call did instead is under **Fixed**.
 - **`assert_no_regression` says which shape the data is, not just that there is
   none.** "current has no scores" reads as *you have no data* to a caller holding
   two hundred completions, when the truth is that `SampleResult.scores()` harvests
@@ -70,18 +112,56 @@ take this release without reading it.
   mean "do not classify", or splitting classifier errors out of `Run.error`,
   changes what a recorded sample means and is a major-version change, not this
   one.
-- **The example rubric no longer restates the response format.** It used to end
-  with `OUTPUT_FORMAT_INSTRUCTION` verbatim, on the reasoning that a rubric should
-  read as a whole prompt on its own — but `PROMPT_TEMPLATE` already appends that
-  block, so anyone starting from the example shipped the format instructions to
-  the model twice. The instruction belongs to the library and the criteria belong
-  to the rubric; a test now pins that the rendered prompt contains it exactly once.
-  The file moved from `rubrics/example-rubric.md` to inside the package, so its
-  sha256 changed. That cannot reach an installed consumer — 0.1.0's wheel carried
-  no rubric, so no installed copy of rigor can have recorded the old hash — but a
-  checkout that graded against the repository file will raise `RubricDriftError`
-  on its next run, which is the mechanism working. Acknowledge it with
-  `accept_rubric_change=True`, or keep your own copy of the old file.
+
+### Fixed
+
+- **The PyPI project page told readers to install opik-rigor from a git clone.**
+  The 0.1.0 wheel was built at the `v0.1.0` tag, and the README's install block was
+  rewritten from `git clone … && pip install .` to `pip install opik-rigor` in the
+  commit *after* the upload — so the description baked into that wheel's METADATA,
+  which is what pypi.org renders for that release and will render for it forever,
+  still tells you to build from source and to write `pip install ".[opik]"`.
+  Nothing in the repository was ever wrong; the artifact was cut before the
+  repository caught up, and an artifact does not update when the tree does. 0.1.1's
+  METADATA carries the current README, checked by reading it back out of the built
+  wheel rather than by looking at `README.md`.
+- **`hash_rubric_text` reported a `str` argument as the opposite mistake.** It
+  validated nothing on entry, so a `str` got several lines in and died on the
+  function's own `b"\r\n"` literal with `TypeError: replace() argument 1 must be
+  str, not bytes` — which reads as *you passed bytes where text was wanted*, the
+  exact inverse of what happened, and sends the reader off to inspect a string
+  that was fine. `str` is now accepted (see **Changed**), and an argument that is
+  genuinely neither text nor bytes is named and refused at the boundary.
+- **The example rubric restated the response format, so anyone who copied it sent
+  that block to the model twice.** It used to end with `OUTPUT_FORMAT_INSTRUCTION`
+  verbatim, on the reasoning that a rubric should read as a whole prompt on its
+  own — but `PROMPT_TEMPLATE` already appends it. The instruction belongs to the
+  library and the criteria belong to the rubric; a test now pins that the rendered
+  prompt contains it exactly once.
+
+  Fixing it changed the file's bytes, and the file also moved from
+  `rubrics/example-rubric.md` in the repository root to
+  `src/opik_rigor/rubrics/example-rubric.md` inside the package. Its sha256 went
+  from `e62bdbb21a0ecbd6f66d4761f8bf8dc48c61dfe62527dd902561181066d69cf4` to
+  `556c1383350d73d71235e40c719cdf816bec8a5693cc4750ad01ae421128dc5d`. Who a
+  recorded hash of the old file can actually reach:
+
+  - **Not an installed consumer.** 0.1.0's wheel carried no rubric at all, so no
+    installed copy of rigor can have recorded the old hash from one.
+  - **A repository checkout that graded against the repository file** raises
+    `RubricDriftError` on its next run, which is the mechanism working. Acknowledge
+    it with `accept_rubric_change=True`, or keep your own copy of the old file.
+  - **An unpacked 0.1.0 sdist**, which is the one case the "additive" claim above
+    does not cover, so it is stated rather than left implied. The 0.1.0 sdist did
+    carry the old file, at `rubrics/example-rubric.md` in its unpacked root — the
+    wheel's omission was not the sdist's. Nothing on that disk moves when 0.1.1 is
+    published, so a hash recorded against it keeps agreeing and no drift fires by
+    itself. What changed is that 0.1.1's sdist has no `rubrics/` directory at its
+    root at all: someone who unpacks the newer sdist over that path gets
+    `FileNotFoundError` from their own configured rubric path, which is louder than
+    a drift error and much louder than silence. An sdist is neither installable as
+    a rubric source nor importable, so this is a footnote and not a caveat on the
+    upgrade.
 
 ### Not fixed, and why
 
@@ -215,4 +295,6 @@ Also fixed after the v0.1.0 tag:
   names wrongly. It did not; the fault was in the HTML-to-markdown converter used
   to read it.
 
+[Unreleased]: https://github.com/ericwehmeyer/opik-rigor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.1.0

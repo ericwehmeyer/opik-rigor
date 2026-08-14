@@ -71,7 +71,7 @@ from .judge import (
 from .pinning import is_pinned, require_pinned
 from .sampling import Run, SampleResult, SampleTimeout, sample, sample_of
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Adapter",
