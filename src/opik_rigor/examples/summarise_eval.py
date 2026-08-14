@@ -2,7 +2,11 @@
 
 Run it::
 
-    python examples/summarise_eval.py --seed 7 --n 40
+    python -m opik_rigor.examples.summarise_eval --seed 7 --n 40
+
+That address works from a bare ``pip install opik-rigor``, which is the point: the
+module ships inside the wheel. It used to be ``python examples/summarise_eval.py``,
+a path that exists in the git tree and in no installation.
 
 Nothing here touches the network. The "model under test" is a plain Python
 function and the judge is backed by :class:`opik_rigor.FakeAdapter`, so the whole
@@ -63,7 +67,13 @@ from opik_rigor import (
     sample,
 )
 
-HERE = Path(__file__).resolve().parent
+#: Default output directory, resolved against the *caller's* working directory.
+#: It was ``Path(__file__).parent / ".rigor-run"`` while this script lived in the
+#: repository's ``examples/``; now that it ships inside the wheel, that expression
+#: would write into site-packages -- a directory the reader does not own, may not
+#: be able to write to, and would never think to look in.
+DEFAULT_OUT = Path(".rigor-run")
+
 #: The rubric ships inside the package, so this example points at the same file a
 #: reader gets from `pip install opik-rigor` rather than at a repository path they
 #: would not have.
@@ -382,7 +392,7 @@ def print_header(args: argparse.Namespace, judge: PinnedJudge, log: EvidenceLog)
     show("seed", args.seed)
     show("n per run", args.n)
     show("corpus", f"{len(CORPUS)} source documents")
-    show("judge model", f"{judge.model_id}  (pinned: no alias, ends in a version marker)")
+    show("judge model", f"{judge.model_id}  (pinned: no alias, ends in a release designator)")
     show("rubric", RUBRIC)
     show("rubric sha256", judge.rubric_hash)
     show("evidence log", log.path)
@@ -601,8 +611,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=Path,
-        default=HERE / ".rigor-run",
-        help="Where the evidence log and the baseline are written. Cleared on each run.",
+        default=DEFAULT_OUT,
+        help="Where the evidence log and the baseline are written, relative to the "
+        "current directory. Cleared on each run.",
     )
     return parser.parse_args(argv)
 

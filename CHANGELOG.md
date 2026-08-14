@@ -7,17 +7,36 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Two independent reviews of the published 0.1.1 wheel, landing together.
+Four independent reviews of the published 0.1.1 wheel, landing together.
 
-The first was adversarial and numerical, working by derivation rather than by
-reading this code: bisection on the score-test inequality, exact `Fraction`
+The fourth is the odd one out and is listed first because it is the one a new
+reader meets first: a cold-start stranger who installed `opik-rigor` 0.1.1 from
+PyPI and followed `README.md` literally. They did not get as far as the numbers.
+Ten defects, and they are not ten faults — they are **one fault, ten times: a
+claim that is true of the source tree and false of the artifact a user
+installs**, which is the sentence this changelog already used once, for 0.1.0's
+rubric. The worked example the quickstart ends on is the first entry under
+**Added**, the release check that would have caught it is the second, and the
+remaining nine defects are the last nine entries under **Fixed**.
+
+**None of the documentation work reaches an existing release.** A project's long
+description is frozen at upload time, so the page PyPI renders for 0.1.1 is the
+old README — dead links, elided hashes, an unrunnable example — and stays that way
+until a new version is uploaded. Those fixes reach readers with the next version,
+not before.
+
+The first of the numerical reviews was adversarial, working by derivation rather
+than by reading this code: bisection on the score-test inequality, exact `Fraction`
 arithmetic, and full brute-force scans. It confirmed that the Wilson bounds are
 exact to 2.2e-16 across 105 grid points, that nothing anywhere conflates
 one-sided with two-sided, that the pass-rate gate never gates on the point
 estimate, that Mann-Whitney's direction and statistic are right, and that the
-realised type-I error is calibrated at 0.048. It found the seven defects under
-**Fixed**. The second measured what `import opik_rigor` costs, and produced the
-first entry under **Changed**.
+realised type-I error is calibrated at 0.048. It found the first seven defects
+under **Fixed**. The next measured what `import opik_rigor` costs, and produced
+the first entry under **Changed**. The last came from outside the numbers
+entirely — an agent designing a third consumer, which could not construct a judge
+at all — and produced the two `is_pinned` entries in the middle of **Fixed**, the
+defect `PROGRESS.md` recorded as item 16.
 
 **One change here is not additive**, and it is the only one: `wilson_lower_bound`
 and `assert_pass_rate` now refuse a `confidence` at or below 0.5, which they used
@@ -27,6 +46,35 @@ still accepts. The items under *Not fixed, and why* below remain queued for 0.2,
 which is where this project puts changes that alter what a recorded sample means.
 
 ### Fixed
+
+- **`AnthropicAdapter` could not call any current Anthropic model.** It sent
+  `temperature` on every request, with a constructor default of `0.0`, and
+  `temperature`/`top_p`/`top_k` were removed from the Messages API on the current
+  generation — Opus 5, Opus 4.8, Opus 4.7, Sonnet 5 and Fable 5 return a **400**
+  for any of them. There was no way to construct an adapter that avoided it:
+  the parameter had no omit-sentinel, the constructor rejected `None`, and the
+  value was passed unconditionally. A judge built the way the README builds one
+  could not complete a single call.
+
+  `temperature` now defaults to `None`, meaning the key is **absent** from the
+  request rather than set to something chosen for you, and it is omitted on every
+  model. An explicit value is still sent to a model that accepts one; against a
+  model that does not, it is refused at *construction*, naming the model, rather
+  than becoming a 400 partway through a run that has already spent calls.
+
+  Omitting unconditionally is deliberate. A model-conditional default would put
+  the vendor table on the happy path, so the day a model ships that the table has
+  not heard of, the zero-argument constructor would start returning 400s again —
+  the same defect, waiting on a release date. The table is consulted only to
+  reject an explicit value, so its going stale costs one thing: an explicit
+  `temperature` against a newer model gets the vendor's 400 instead of our
+  `ValueError`. It can never break a call that works.
+
+  Together with the pin-rule fix below, this closes the second of two blockers:
+  `is_pinned` refusing every current model id was the front door locked, and this
+  was there being no room behind it. Cost worth naming: an older model that still
+  accepts sampling parameters now gets the API default rather than `0.0` unless
+  asked, and on a current model that lever no longer exists at all.
 
 - **A score-distribution gate returned green on infinite input.** This is the
   worst thing in the release and it is the exact failure the library exists to
@@ -108,6 +156,92 @@ which is where this project puts changes that alter what a recorded sample means
   one-sided 95% lower bound is `0.8808`; 0.86 is neither. A worked example in a
   statistics library is a claim, and this one is now asserted against an oracle in
   the test suite rather than trusted.
+- **`is_pinned` rejected every current frontier Anthropic model id**, and
+  `require_pinned` is on the path a new user hits in their first five minutes.
+  `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8` and every other current id
+  were refused, because the rule required a trailing date and Anthropic's ids no
+  longer carry one — while `claude-3-7-sonnet-20250219`, retired on 2026-02-19,
+  was accepted. The rule had been checking spelling in place of the property it
+  stood for. It now checks the property: an id is pinned when it contains no alias
+  token (`latest`, `newest`, `current`, `stable`, `default`) **and** ends in a
+  release designator — a release number (`claude-opus-4-8`), a date stamp
+  (`-20251001`, `-2024-08-06`), or an explicit version (`-v1`, `-2.1.0`). A last
+  component that is a *word* (`gpt-4o`, `mistral-large`, `…-instruct`) names a kind
+  of model rather than one release of it, and a kind is what providers re-point.
+  `_`, `@` and `:` now count as component separators, so Vertex
+  (`claude-opus-4-5@20251101`) and Bedrock (`…-20241022-v2:0`) snapshot spellings
+  are recognised too. Whether an id re-points is ultimately a provider *policy* and
+  no string carries it, so that residue is isolated in one documented table in
+  `pinning.py` rather than spread through the predicate, and the module docstring
+  states what the rule still cannot catch.
+- **`gpt-4.1` was accepted as pinned**, and it is an OpenAI alias that re-points to
+  the newest dated snapshot — its `4.1` satisfied the old dotted-version branch.
+  Found while checking the fix above in *both* directions rather than only the one
+  that was reported. The same table refuses `gpt-5` and `gpt-4`;
+  `gpt-4o-2024-08-06` and `gpt-4.1-2025-04-14` are unaffected.
+
+- **Four repo-relative links in `README.md` 404 from the PyPI project page**
+  (`LICENSE` twice, `examples/`, `COMPATIBILITY.md`). PyPI renders a long
+  description with no repository, no branch and no directory behind it. All are now
+  absolute `https://github.com/...` URLs.
+
+- **The `[opik]` extra's two functions were unimportable from where the README
+  implied.** `log_sample_to_opik` and `log_assertion_to_opik` were named in prose
+  with no import path; they live in `opik_rigor.integrations.opik`, and reaching
+  for them at the package root raises `ImportError`. The README now gives the
+  import line.
+
+  The other direction — re-export both at the root — was considered and rejected,
+  because it is the one change that would break the property the same section
+  advertises: `opik_rigor/__init__.py` imports no integration at module scope, a
+  subprocess test asserts it, and that is what keeps `import opik_rigor` from ever
+  dragging in a vendor SDK. Here the docs were wrong and the code was right.
+
+- **The one *passing* output in the quickstart could not be produced from the code
+  the README gave.** It said "change `20` to `200` and `min_rate` to `0.8`" and
+  then showed `passed=True observed=0.9150 ...`. Doing exactly that prints nothing:
+  on success `assert_pass_rate` returns a report dict and is silent. The README now
+  shows the assignment and the `print`, and lists the full key set.
+
+  Worse than a missing `print`, and now stated in the README rather than left to be
+  discovered: the line reads `observed=` and the key is **`pass_rate`**. The
+  roadmap's own complaint that "the key names are not guessable" was being
+  illustrated, unwittingly, by the roadmap's own document.
+
+- **A block labelled "the output is pasted verbatim, nothing here is illustrative"
+  was neither.** The rubric-drift example showed a judge named `'j'` that appears
+  nowhere in the quickstart and elided its hashes with `...`, which the real message
+  never does. It is now a real message from a real run: judge `'summariser'`, both
+  sha256 hashes in full, and the exact edit that produces it. The paragraph making
+  the claim now states precisely what was done to the output — hard-wrapped, and
+  nothing else.
+
+- **`PROGRESS.md` said 0.1.1 was unreleased.** It has been on PyPI since
+  2026-08-13. Its test counts were stale as well and have been re-derived by
+  running, with the command beside each number.
+
+- **`examples/README.md` told the reader the judge was backed by
+  `rigor.FakeAdapter`.** The import package is `opik_rigor`; `rigor` on PyPI is an
+  unrelated HTTP-API-testing DSL, so that line pointed at somebody else's package —
+  the exact collision this project renamed itself to avoid, reintroduced in prose.
+
+- **`sample_of` was in `__all__` and in no document**, next to a `sample_over` that
+  the roadmap lists as not yet built. Two names one letter apart, one shipped and
+  undocumented, one documented and absent. `sample_of` is now described where the
+  gates are, and the roadmap entry for `sample_over` names the collision.
+
+- **The `## Development` block gave only `.venv/bin/python`.** The primary
+  development machine is Windows, where the interpreter is
+  `.\.venv\Scripts\python.exe`. Both forms are given, and both now run
+  `pytest tests examples` and `ruff check src tests scripts`.
+
+- **Install cost was stated nowhere.** Measured, into empty virtualenvs, cold:
+  `pip install opik-rigor` takes 54 s and grows a virtualenv from 11.5 MiB to
+  192.8 MiB (4 packages); `pip install "opik-rigor[opik]"` takes 4 min 48 s and
+  reaches 414.9 MiB across 74 packages, pulling litellm, openai, tokenizers,
+  huggingface-hub, tiktoken, sentry-sdk and three `tree-sitter` grammars. A reader
+  of "two functions, not a framework" does not expect the second number, so the
+  README now gives both.
 
 ### Changed
 
@@ -188,7 +322,53 @@ which is where this project puts changes that alter what a recorded sample means
   now states the recommendation, says in terms that it is arithmetic on one rate
   rather than a power calculation, and quotes the power alongside it.
 
+- **The `ModelPinError` message now names the clause that refused the id**, and
+  quotes worked examples that are themselves pinned. The old message instructed
+  the reader to add a date suffix, which for a current Anthropic id produces an id
+  that does not exist — advice that is confidently wrong. A test now asserts that
+  every example the message quotes satisfies `is_pinned`, so that class of untrue
+  advice fails the suite rather than relying on someone proof-reading it.
+
 ### Added
+
+- **The worked example ships inside the wheel**, as
+  `opik_rigor/examples/summarise_eval.py`, and the quickstart's last line is now
+  `python -m opik_rigor.examples.summarise_eval --seed 7 --n 40`.
+
+  It used to be `python examples/summarise_eval.py`. `examples/` is a directory in
+  the git tree; the distribution is `opik_rigor/` plus
+  `opik_rigor-0.1.1.dist-info/` and nothing else, so the one command the
+  quickstart ended on — after four paragraphs selling it — could not be run by
+  anybody who had followed the `pip install` line above it. The script itself was
+  never the problem: fetched from the repository it runs clean against the
+  published wheel, exit 0. Its *address* was the problem.
+
+  Two honest fixes existed — ship the example, or stop advertising it — and this
+  is the first, for the same reason 0.1.1 chose it for the rubric: a reader who
+  installs a library and is told there is a worked example is better off with the
+  example than with a shorter README. `--out` now defaults to `.rigor-run` under
+  the caller's working directory rather than beside the script, which after the
+  move would have been inside site-packages.
+
+  `tests/test_packaging.py` asserts both modules are in the built zip and runs the
+  example out of the *extracted* wheel with nothing else on the path, so a move
+  back out of the package fails a test rather than a stranger.
+
+- **`readme-paths`, a new check in `scripts/verify_release.py`.** It reads every
+  address the README hands a reader — markdown link targets, path arguments inside
+  fenced code blocks, and `python -m` targets under `opik_rigor` — and asserts each
+  resolves for somebody standing on the project page or on an install, rather than
+  in a checkout. It is the single check that catches both the entry above and the
+  dead links under **Fixed**, and it generalises: this was the third time the
+  project shipped an address that only a checkout could resolve. Unit-tested in
+  `tests/test_release_checks.py`
+  against hand-derived tables in the style of that file, plus synthetic wheels for
+  the broken cases this repository can no longer produce on purpose.
+
+  It refuses a relative link *even when the file is in the wheel*. `LICENSE` really
+  is shipped, under `.dist-info/licenses/`, and the link still 404s for the reader
+  who clicks it. Reachable and addressable are different claims, and conflating
+  them is how four dead links survived two releases.
 
 - **`numpy>=1.21` is now a declared dependency.** It always was one in fact:
   `distribution.py` imports NumPy directly, and `assert_score_distribution`'s
@@ -225,6 +405,16 @@ which is where this project puts changes that alter what a recorded sample means
   tail. The recommendation is the point past which the power *stays* at or above
   the target, for the same lattice reason `_runs_needed` reports a stable point:
   164 is the first n to reach 80% and 165-187 fall back below it.
+
+- **`pinning.PINNED_EXAMPLES`** — the worked examples the `ModelPinError` message
+  quotes, exposed so that a caller, and the test suite, can check the advice
+  against the predicate instead of against a proof-read.
+
+**On the pin rule and compatibility.** No signature changed and nothing was
+renamed. Every model id 0.1.1 accepted is still accepted **except `gpt-4.1`**,
+which it should not have accepted. Ids that were refused and are now accepted
+cannot break a caller, because the only thing `require_pinned` ever did with them
+was raise.
 
 ## [0.1.1] - 2026-08-13
 

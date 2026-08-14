@@ -1,10 +1,20 @@
 """The example has to keep working, so it is run rather than imported.
 
 Importing ``summarise_eval`` and calling its functions would test the pieces and
-miss the thing that matters: that ``python examples/summarise_eval.py`` finishes,
-offline, on a machine with no Opik and no credentials, and prints a walkthrough
-that still says what the README claims it says. So every test here starts a
-subprocess and reads its stdout, exactly as a reader would.
+miss the thing that matters: that
+``python -m opik_rigor.examples.summarise_eval`` finishes, offline, on a machine
+with no Opik and no credentials, and prints a walkthrough that still says what the
+README claims it says. So every test here starts a subprocess and reads its
+stdout, exactly as a reader would.
+
+**It is invoked as a module, never as a file path**, and that is the point of this
+docstring. The example now ships inside the wheel, and the address the README
+gives a reader is ``-m opik_rigor.examples.summarise_eval``. A test that ran
+``python src/opik_rigor/examples/summarise_eval.py`` would exercise a spelling no
+reader is given and would keep passing on the day the module stopped being
+importable -- which is the same class of fault as the old
+``python examples/summarise_eval.py``: an address true of the source tree and
+false of the artifact.
 
 Fast by construction: the sampled "model" is a plain function and the judge is a
 scripted fake, so a 40-run walkthrough costs about a second, nearly all of it
@@ -19,7 +29,8 @@ from pathlib import Path
 
 import pytest
 
-EXAMPLE = Path(__file__).resolve().parent / "summarise_eval.py"
+#: The address the README gives, verbatim. Not a path.
+EXAMPLE_MODULE = "opik_rigor.examples.summarise_eval"
 
 #: Enough runs for the headline gate to clear its bar. Below roughly 30 the
 #: Wilson lower bound sits under 0.60 and the example stops early *by design* --
@@ -33,7 +44,8 @@ def run_example(
 ) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
-        str(EXAMPLE),
+        "-m",
+        EXAMPLE_MODULE,
         "--seed",
         str(seed),
         "--n",

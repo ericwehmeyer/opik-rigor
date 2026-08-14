@@ -24,7 +24,8 @@ it is a reconstruction.
 | 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
 | — | Publish | **v0.1.0 published to PyPI 2026-08-13** — `pip install opik-rigor` |
 | 5 | Phase 3: close the consumer-reported API gaps, additively | **complete** — items 10–15 and item 8's message closed; 534 passed offline / 543 with opik |
-| — | Release 0.1.1 | **prepared, not released** — branch `release/0.1.1`, 537 passed offline; see [Releasing 0.1.1](#releasing-011--what-is-prepared-and-what-remains) |
+| — | Release 0.1.1 | **v0.1.1 published to PyPI 2026-08-13** — `pip install opik-rigor==0.1.1` |
+| 6 | Documentation defects found by a cold-start stranger installing from PyPI | **complete** — see [Documentation defects](#documentation-defects-found-from-outside-2026-08-14) |
 
 ## Session 1 — module status
 
@@ -82,7 +83,7 @@ stake in the implementation:
 | `COMPATIBILITY.md` | written **before** any integration code | — |
 | `src/opik_rigor/integrations/opik.py` | done | `tests/test_integration_opik.py` — 11 |
 | `src/opik_rigor/integrations/pytest_plugin.py` | done | `tests/test_pytest_plugin.py` — 15 |
-| `examples/summarise_eval.py` + README | done | `examples/test_example_runs.py` — 19 |
+| `src/opik_rigor/examples/summarise_eval.py` + `examples/README.md` | done — **moved inside the package** on 2026-08-14, so `python -m opik_rigor.examples.summarise_eval` works from a bare install | `examples/test_example_runs.py` — 19, plus two wheel checks in `tests/test_packaging.py` |
 
 Two environments are maintained: `.venv` (no Opik — the suite must be green
 without it) and `.venv-opik` (Opik 2.2.28 installed, for the integration and
@@ -289,7 +290,7 @@ Item 9 (no token usage on the `Adapter` seam) is likewise still open, for the sa
 reason: adding `complete_with_usage` to the protocol is additive for adapters but
 not for code that type-checks against `Adapter`.
 
-### 16. `is_pinned` rejects every current frontier Anthropic model id
+### 16. `is_pinned` rejects every current frontier Anthropic model id — **RESOLVED**
 
 Found on 2026-08-13, hours after 0.1.1 shipped, by an agent designing a *third*
 consumer — not by reading this repository. Verified against the published 0.1.1
@@ -319,16 +320,51 @@ implementation encodes a *proxy* for it — "has a date in the name" — and the
 has stopped tracking the thing it stood for. A vendor changed its naming
 convention and rigor's gate started measuring spelling instead of stability.
 
-The fix is not simply to widen the regex, and that is why this is not a one-liner:
-`claude-opus-5` genuinely *is* an alias that can be re-pointed, so accepting it
-would make `is_pinned` a lie in the other direction. The honest options are a
-per-provider rule set, an explicit allow-list the caller supplies, or separating
-"syntactically pinned" from "the caller asserts this is pinned" so the assertion is
-recorded in the evidence log rather than inferred from a string. Each changes what
-a recorded pin *means*, so this waits for **0.2** alongside items 8 and 9.
+The fix is not simply to widen the regex, and that is why this was not a one-liner:
+whether an id re-points is a provider *policy*, and `claude-opus-5` and `gpt-5` are
+the same shape with opposite answers, so no vendor-neutral rule can separate them.
 
-Until then, the workaround is to not call `require_pinned` on Anthropic ids, which
-is a bad workaround and is stated here so nobody rediscovers it at midnight.
+**Resolved.** The rule now checks immutability directly instead of checking for a
+date, in three clauses. (1) No alias token — `latest`, `newest`, `current`,
+`stable`, `default`; this half was always the load-bearing one and is unchanged.
+(2) The id must end in a *release designator*: splitting on `-`, `_`, `@`, `:`, the
+last component must be nothing but a version (`5`, `8`, `20251001`, `06`, `v1`,
+`2.1.0`). A last component that is a *word* — `sonnet`, `mini`, `4o`, `large`,
+`instruct` — names a kind of model, and a kind is exactly what a provider
+re-points at new weights. (3) One documented table, `_MOVING_FAMILIES`, for
+providers that publish `<family>-<number>` as a moving pointer; today that is
+OpenAI only, and it is the reason `gpt-5` and `gpt-4.1` are refused while
+`claude-opus-5` is accepted.
+
+The relaxation was checked in both directions, because a fix that makes everything
+pass is the removal of the check rather than a repair of it. Every current
+Anthropic id is accepted; `claude-3-5-sonnet-latest`, bare `gpt-4o`, `claude`,
+`my-finetune`, `mistral-large`, the empty string and non-strings are still refused;
+and `gpt-4.1`, which **0.1.1 wrongly accepted** as pinned (its `4.1` satisfied the
+old dotted-version branch), is now correctly refused. That last one was found by
+running the hand-derived verdict table against the shipped predicate and is a
+second, previously unrecorded defect in the same function.
+
+Two things the new rule deliberately does not do, both written into the module
+docstring so the next person meets them before a consumer does. It **accepts** a
+moving `<family>-<number>` pointer from a provider not yet in the table — the same
+class of failure as the defect it replaces, now costed at one line in a table
+rather than a rewrite. And it **refuses** a self-hosted id ending in a word even
+when its weights never move; the fix is a `-v1` suffix, and the asymmetry is
+chosen, because a false refusal is loud and a false acceptance silently
+invalidates every score recorded after it.
+
+Two things it does not *mean*, also stated in the docstring: pinned is not
+*available* (`claude-3-7-sonnet-20250219` is retired and still names one immutable
+version, which is what a score recorded against it in 2025 needs), and pinned is
+not *correct* (nothing here checks that a model exists).
+
+This is **additive under the compatibility rule**: no signature changed, no name
+was renamed, and no id that 0.1.1 accepted is now refused *except* `gpt-4.1`, which
+0.1.1 should not have accepted. Ids that were refused and are now accepted cannot
+break a caller, because the only thing `require_pinned` did with them was raise.
+The rejection *message* changed, which is the same kind of change 0.1.1 shipped
+additively as the *message* half of item 8.
 
 ### 17. `import opik_rigor` costs a second, for a gate most suites never call
 
@@ -434,11 +470,52 @@ covers**. Until those coercion paths have tests that would notice, dropping NumP
 is a change whose regression nothing in this repository can catch, which is the
 one kind of change this project does not make.
 
-### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model
+### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model — **RESOLVED 2026-08-14**
+
+**Resolved by the first option below, with a piece of the second.** `temperature`
+now defaults to `None`, meaning the key is *absent from the request* rather than
+set to something chosen for you, and it is omitted unconditionally — on every
+model, current or older. An explicitly-passed value is still sent to a model that
+accepts one; against a model that does not, it is refused at **construction**,
+with a message naming the model, rather than becoming a 400 partway through a run
+that has already spent calls.
+
+Omitting unconditionally is the part worth recording. A model-conditional default
+would put the vendor table on the happy path, so the day Anthropic ships a model
+the table has not heard of, the zero-argument constructor starts returning 400s
+again — the same defect, waiting on a release date. Omitting always is correct on
+every model Anthropic serves and cannot rot. The table (`_SAMPLING_REMOVED`) is
+therefore consulted *only* to reject an explicit value, which means its staleness
+costs exactly one thing: an explicit `temperature` against a model released after
+the table was written produces the vendor's 400 instead of our `ValueError` —
+which is the behaviour that shipped before the table existed. It can never break a
+call that works.
+
+What it costs: an older model that still accepts sampling parameters now gets the
+API default rather than `0.0` unless asked. On a current model that lever no
+longer exists at all, which is a fact about the provider and not a choice this
+library gets to make.
+
+Verified against the merged tree: the zero-argument constructor yields
+`temperature=None` for `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-6` and
+`claude-haiku-4-5-20251001`; `AnthropicAdapter("claude-opus-5", temperature=0.0)`
+raises `ValueError`; `AnthropicAdapter("claude-opus-4-6", temperature=0.0)` keeps
+`0.0`; the gateway spelling `anthropic.claude-opus-5` matches the table and the
+finetune name `my-claude-opus-5-tuned` does not. Tests assert the *absence* of the
+key in the built payload, not merely that a call succeeds.
+
+**With items 16 and 19 both closed, rigor can judge with a current Anthropic
+model.** Those were the two blockers and they were sequential: 16 was the front
+door locked, 19 was there being no room behind it.
+
+The original record follows, because the reasoning that chose between the options
+is the part worth keeping.
+
+---
 
 Found on 2026-08-14 by a coordinating agent reading Anthropic's own migration
 reference against `src/opik_rigor/adapters/anthropic.py`, and confirmed here by
-reading the call shape rather than by spending a credential. The adapter passes
+reading the call shape rather than by spending a credential. The adapter passed
 `temperature` on every request:
 
 ```python
@@ -463,14 +540,17 @@ loudly at least — `complete()` wraps provider exceptions, so the caller sees
 `AdapterError: anthropic call failed for model 'claude-opus-5': BadRequestError:
 ...` rather than a wrong answer — but it fails on every call.
 
-**This is worse than item 16, and the two compound.** Item 16 is a gate that
-*refuses to start* with a current model id; a consumer can route around it by not
-calling `require_pinned`, which is a bad workaround but is a workaround. This one
-is at the API call itself, so routing around the gate buys a 400 instead of a
-judgement. **Both must be fixed before rigor works with any current Anthropic
-model** — fixing either alone leaves the library unable to judge with anything
-Anthropic currently serves. Item 16 is the front door being locked; item 19 is
-there being no room behind it.
+**This is worse than item 16 was, and until item 16 was fixed the two compounded.**
+Item 16 was a gate that *refused to start* with a current model id; a consumer
+could route around it by not calling `require_pinned`, which was a bad workaround
+but was a workaround. This one is at the API call itself, so routing around the
+gate buys a 400 instead of a judgement. Item 16 was the front door being locked;
+item 19 is there being no room behind it. **Item 16 is now fixed and this one is
+not**, which means the door opens onto the 400: `PinnedJudge(AnthropicAdapter(
+"claude-opus-5"), ...)` now constructs and then fails on its first `complete()`.
+That is a better failure than the previous one — it is at the call, with a message
+naming the model and the provider's own error — but rigor still cannot judge with
+anything Anthropic currently serves until this item lands.
 
 **Why this is recorded rather than implemented.** The obvious fix — omit
 `temperature` when the model id looks current — is a runtime behaviour change on a
@@ -487,8 +567,13 @@ surface a consumer may read. The honest options:
   today stops working.
 * **Per-model parameter rules** — a table of which models accept which sampling
   parameters, so the adapter sends what the target actually supports. Correct, and
-  it acquires the same maintenance problem item 16 has: a vendor changes its
-  surface and the table silently stops tracking it.
+  it acquires the same maintenance problem item 16 had: a vendor changes its
+  surface and the table silently stops tracking it. Item 16's fix is the precedent
+  for how to hold that honestly rather than avoid it — `_MOVING_FAMILIES` in
+  `pinning.py` is one table, commented as needing updates, with the gap it leaves
+  written into the module docstring instead of discovered by a consumer. A table
+  whose staleness is documented and localised is a different thing from a rule
+  that has silently stopped tracking reality, which is what item 16 was.
 * **Drop the parameter entirely** — smallest code, and it removes a public
   property and a constructor keyword. That is breaking, and waits for 0.2.
 
@@ -497,6 +582,10 @@ one; it needs a test that asserts the key is *absent* from the request payload,
 not merely that the call succeeds. Deciding between it and the per-model table is
 the open question, and it is deliberately left open here rather than settled in a
 branch whose subject is import cost.
+
+**How it was settled:** the first option, plus the second's table used *only* on
+the explicit-value path so it can never sit between a default-constructed adapter
+and a working call. See the resolution note at the top of this item.
 
 ## Phase 3 — closing the recorded gaps
 
@@ -516,7 +605,10 @@ decide a verdict: `assert_pass_rate`'s success-dict key set, `underpowered` and
 `runs_needed` on the failure path, `lower_bound == 0.8596681784340271` for 38/40,
 and the 16-key regression report. It reports no problems.
 
-**Test counts, and why the headline number depends on the command.**
+**Test counts as of Phase 3, and why the headline number depends on the command.**
+These are the numbers Phase 3 measured, kept as its record. The current ones are
+under [Documentation defects](#documentation-defects-found-from-outside-2026-08-14)
+below, and they are larger because `main` has taken property-based tests since.
 
 | command | result |
 |---|---|
@@ -533,12 +625,25 @@ rewritten rather than added — `test_shipped_rubric_ends_with_the_output_format
 became `test_the_shipped_rubric_states_the_output_format_exactly_once`, asserting
 the inverse, because the thing it pinned turned out to be the bug.
 
-## Releasing 0.1.1 — what is prepared, and what remains
+## Releasing 0.1.1 — what shipped, and what remains
 
-Prepared on branch `release/0.1.1`, up to but not including the tag. Nothing has
-been tagged, pushed, released, or uploaded.
+**0.1.1 was published to PyPI on 2026-08-13.** `pip install opik-rigor` now
+resolves to it, and a clean-venv install was re-checked on 2026-08-14 while fixing
+the documentation defects below:
 
-What is done: the version is `0.1.1` in `pyproject.toml` and in
+```
+python -m venv venv-bare
+venv-bare\Scripts\python.exe -m pip install --no-cache-dir opik-rigor
+venv-bare\Scripts\python.exe -c "import opik_rigor; print(opik_rigor.__version__)"
+```
+
+→ `0.1.1`, from `venv-bare\Lib\site-packages\opik_rigor\__init__.py`. The
+paragraphs below were written before the upload and are kept as the record of what
+was prepared; the wording has been corrected where it said "not released", which is
+the same defect this file exists to catch — a document that is true of the moment
+it was written and false of the world it describes.
+
+What was done before the tag: the version is `0.1.1` in `pyproject.toml` and in
 `src/opik_rigor/__init__.py`, which must always move together because
 `test_every_public_name_is_importable_from_the_package_root` compares
 `__version__` against install-time metadata. `CHANGELOG.md` closes the section as
@@ -562,12 +667,12 @@ the changelog under the version heading; the short form is that this file reserv
 0.2 for items 8 and 9 in writing, and the only known consumer pinned
 `>=0.1.0,<0.2` on that reading.
 
-**Ship it rather than sit on it.** `main` currently documents
+**Ship it rather than sit on it.** ~~`main` currently documents
 `opik_rigor.example_rubric_path()` in the README quickstart, and the only
-installable version is 0.1.0, which has no such function. That window opened when
-`11da812` merged and closes when 0.1.1 is on the index. (The *published* 0.1.0
-README does not mention it — that page has its own, older instance of the same
-fault, recorded in the changelog.)
+installable version is 0.1.0, which has no such function.~~ That window opened when
+`11da812` merged and **closed on 2026-08-13 when 0.1.1 reached the index**. (The
+*published* 0.1.0 README does not mention it — that page has its own, older
+instance of the same fault, recorded in the changelog.)
 
 ### The trusted-publisher registrations already exist. Do not redo them.
 
@@ -583,7 +688,10 @@ evidence that anything is missing — the publisher is now attached to the proje
 Re-registering "to be safe" is superstition. If an upload ever fails at the auth
 step again, the fault is a name that *changed*, not one that is missing.
 
-### Steps remaining, in order
+### Steps, in order — 1 to 7 are done
+
+Steps 1–7 were carried out on 2026-08-13 and the upload succeeded; they are kept
+because the next release repeats them. **Steps 8 and 9 are the ones still open.**
 
 1. **Review and merge `release/0.1.1` into `main`.** Terminal, or a PR in a
    browser if you want CI to run on the merge candidate.
@@ -619,14 +727,112 @@ step again, the fault is a name that *changed*, not one that is missing.
 9. **Record the publish here**, as the `v0.1.0` row above records its own, and
    move `[Unreleased]`'s compare link forward if anything lands after the tag.
 
+## Documentation defects found from outside (2026-08-14)
+
+Ten defects, reported by a cold-start stranger who installed `opik-rigor` 0.1.1
+from PyPI and followed `README.md` literally. Every one of them is the same fault
+this file has already recorded twice under other names: **a claim that is true of
+the source tree and false of the artifact a user installs.** The full list and the
+per-defect reasoning is in `CHANGELOG.md` under `[Unreleased]`; what belongs here
+is the state it leaves the build in.
+
+**The worked example moved into the package.** `examples/summarise_eval.py` is now
+`src/opik_rigor/examples/summarise_eval.py`, and the README's last quickstart line
+is `python -m opik_rigor.examples.summarise_eval --seed 7 --n 40`. The old address
+was a directory in the git tree; the wheel is `opik_rigor/` plus
+`opik_rigor-0.1.1.dist-info/` and nothing else, so the command the quickstart ended
+on could not be run by anyone who had followed the install line above it. This is
+the same call that was already made for the rubric in Phase 3, item 15, and it was
+made the same way: ship the asset, do not delete the claim. `examples/` keeps its
+walkthrough and its subprocess test; the test now invokes `-m`, never a file path.
+
+**One new release check, `readme-paths`.** It reads every address the README hands
+a reader — markdown link targets, path arguments inside fenced code blocks, and
+`python -m` targets under `opik_rigor` — and asserts that each one resolves for
+somebody standing on PyPI or on an install rather than in a checkout. Wired into
+`scripts/verify_release.py` beside `readme-symbols` and unit-tested in
+`tests/test_release_checks.py` against hand-derived tables (L, C and M) and
+synthetic wheels, in the style of the rest of that file. Run against the README as
+it stood before this session it reports four unreachable addresses and blocks the
+release; run against the current one it passes.
+
+The check earns its place twice over: it also caught a sentence *added during this
+session*. A first draft of the extras paragraph wrote
+`from opik_rigor import log_sample_to_opik` in prose to say that the import does
+not work, and `readme-symbols` — correctly — read it as a claim that it does.
+
+**Measured on this branch** (Windows, Python 3.14.4, `PYTHONPATH` pointed at this
+worktree's `src/` so that the shared `.venv`'s editable install of the main
+checkout cannot answer instead):
+
+| command | result |
+|---|---|
+| `.venv\Scripts\python.exe -m pytest` | **959 passed, 11 skipped, 1 xfailed** |
+| `.venv\Scripts\python.exe -m pytest tests examples` | **978 passed, 11 skipped, 1 xfailed** |
+| `.venv\Scripts\python.exe -m ruff check src tests scripts examples` | clean |
+| `.venv\Scripts\python.exe scripts\verify_release.py` | **16 passed, 0 failed, 0 skipped** |
+
+Measured after merging `main`, which landed the pinning rewrite, the import-cost
+work and the property-based suites in the same window; before that merge the same
+two commands on this branch reported 691 and 710. Both numbers are recorded
+because a reader comparing against either has to know which tree it was.
+
+`pytest` alone still honours `testpaths = ["tests"]` and therefore collects 19
+fewer than `pytest tests examples`; both numbers are above so neither can be read
+as a regression against the other.
+
+**The `.venv-opik` row is deliberately absent, and that is itself a finding.**
+`.venv-opik\Scripts\python.exe -m pytest tests examples` reports 976 passed, 12
+skipped, 1 xfailed and **1 failed** —
+`test_every_public_name_is_importable_from_the_package_root`, on its last line,
+which compares `opik_rigor.__version__` against `importlib.metadata.version`. That
+venv holds an installed `opik_rigor-0.1.0.dist-info` while the tree says `0.1.1`,
+so the failure is a stale environment and not a defect in this branch. It is
+recorded rather than quietly omitted: reinstalling that venv is a one-line fix
+(`.venv-opik\Scripts\python.exe -m pip install -e ".[dev]"`) and a number nobody
+can reproduce is worse than no number.
+
+**Install cost, measured because the README now states it.** Each into its own
+empty virtualenv, cold (`--no-cache-dir`), Python 3.14.4 on Windows:
+
+| requirement | time | venv size | packages |
+|---|---|---|---|
+| `opik-rigor` | 54.0 s | 11.5 MiB → 192.8 MiB | 4 |
+| `opik-rigor[opik]` | 287.5 s | 11.5 MiB → 414.9 MiB | 74 |
+
+scipy is 109.6 MiB and numpy 31.2 MiB, plus 19.3 and 20.1 MiB of bundled shared
+libraries; rigor's own code is 0.4 MiB. The extra adds litellm (101.9 MiB), openai,
+tokenizers, huggingface-hub, hf-xet, tiktoken, sentry-sdk, three `tree-sitter`
+grammars — and pytest, which Opik pulls in for its own plugin.
+
+**A README fix does not reach an existing release.** A project's long description
+is frozen at upload, so the page rendered on PyPI for 0.1.1 is still the old README
+— dead links, elided hashes, unrunnable example and all — and stays that way until
+a new version is uploaded. Anyone reading this should treat that as the reason to
+cut 0.1.2, not as something that self-heals.
+
 ## Decisions made, and why
 
 **The pin rule lives in one module.** `pinning.py` is the single definition of
 "reproducible model id", imported by both the adapters and the judge. It was
 written before either of them precisely so the two could not drift apart on what
-the word means. An id must end in a concrete version marker (`-20250514`,
-`-2024-08-06`, `-v1`, `-2.1.0`) and must not contain `latest`, `newest`,
-`current`, `stable`, or `default`.
+the word means. An id must not contain `latest`, `newest`, `current`, `stable`, or
+`default`, and must end in a release designator — a release number
+(`claude-opus-4-8`), a date stamp (`-20250514`, `-2024-08-06`), or an explicit
+version (`-v1`, `-2.1.0`). It must also not be a member of one small, documented
+table of providers that publish `<family>-<number>` as a moving pointer.
+
+**The vendor-specific part of the pin rule is one table, on purpose.** Item 16
+below is what happens when a rule written against one vendor's naming convention
+outlives the convention. The replacement separates the half that is a property of
+naming in general — an alias has to be *named* `latest`, and a name ending in a
+word names a kind of model rather than a release of one — from the half that is
+irreducibly a provider policy, which no string can reveal. The second half is
+`_MOVING_FAMILIES` in `pinning.py`: one tuple, one provider today, with a comment
+saying it will need updating and a docstring section saying what the rule cannot
+catch. The point is that the next convention change costs a line in a table rather
+than a rewrite of the predicate — and that the gap is visible in advance rather
+than discovered by a consumer.
 
 **The evidence log has no delete API.** Not an oversight — `tests/test_evidence.py`
 asserts that no public name on `EvidenceLog` matches delete/remove/clear/truncate/
@@ -677,8 +883,9 @@ and a quickstart that only shows success would be selling the wrong thing.
 ```
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m ruff check src tests
+.\.venv\Scripts\python.exe -m pytest tests examples
+.\.venv\Scripts\python.exe -m ruff check src tests scripts examples
+.\.venv\Scripts\python.exe scripts\verify_release.py
 ```
 
 Local venv is Python 3.14.4 with scipy 1.18.0 and pytest 9.1.1. CI runs Ubuntu and
