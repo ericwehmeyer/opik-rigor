@@ -27,7 +27,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 
-from .base import AdapterError, reject_credential_kwargs
+from .base import AdapterError, ForbiddenKwarg, reject_credential_kwargs
 
 #: Pinned by construction: a default that failed ``is_pinned`` would make every
 #: fixture in the suite a bad example of how to name a model.
@@ -77,7 +77,7 @@ class FakeAdapter:
         latency: float = 0.0,
         fail_with: BaseException | type[BaseException] | None = None,
         fail_after: int | None = None,
-        **forbidden: object,
+        **forbidden: ForbiddenKwarg,
     ) -> None:
         reject_credential_kwargs(forbidden, type(self).__name__)
 

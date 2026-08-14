@@ -19,6 +19,7 @@ from typing import Any
 from .base import (
     ENV_ANTHROPIC_API_KEY,
     AdapterError,
+    ForbiddenKwarg,
     reject_credential_kwargs,
     require_env_key,
 )
@@ -49,7 +50,7 @@ class AnthropicAdapter:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         timeout: float = 60.0,
-        **forbidden: object,
+        **forbidden: ForbiddenKwarg,
     ) -> None:
         reject_credential_kwargs(forbidden, type(self).__name__)
 

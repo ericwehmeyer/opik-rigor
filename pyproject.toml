@@ -48,6 +48,20 @@ pytest = ["pytest>=7.0"]
 # --no-isolation, which is offline and deterministic. Without both the wheel checks
 # skip -- and a packaging check that skips is how 0.1.0 shipped without py.typed.
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.6", "build>=1.0", "hatchling>=1.20"]
+# The package ships `py.typed`, which is a promise to a downstream user's type
+# checker that these annotations are complete enough to check against. Nothing
+# verified that promise until `verify_release.py`'s `wheel-annotations` check, and
+# that check needs a checker installed -- so mypy is declared here rather than left
+# to whoever remembers. It is a separate extra from `dev` because it is the only
+# dependency in this file that CI's build job needs and CI's test job does not.
+#
+# pyright is deliberately absent. It is distributed as a Node program (the PyPI
+# package downloads a node runtime on first run), which is a network fetch and a
+# second language runtime inside a release gate whose whole point is to be
+# hermetic. It is a documented release-time check instead -- see docs/TYPING.md --
+# and the two checkers disagree only about the package's *internals*, never about
+# what a consumer sees.
+typecheck = ["mypy>=1.11"]
 
 [project.urls]
 Homepage = "https://github.com/ericwehmeyer/opik-rigor"
@@ -55,9 +69,20 @@ Repository = "https://github.com/ericwehmeyer/opik-rigor"
 Issues = "https://github.com/ericwehmeyer/opik-rigor/issues"
 
 # Registered as "rigor", never "opik": Opik ships its own pytest11 plugin under
-# that name (opik.plugins.pytest.hooks). See COMPATIBILITY.md. The module imports
-# nothing third-party at module scope, so loading it is cheap for suites that
-# never use the marker.
+# that name (opik.plugins.pytest.hooks). See COMPATIBILITY.md. Verified by
+# installing both into one foreign project: the two entry points coexist under
+# distinct names, collection succeeds, and rigor's reported numbers are identical
+# with opik present.
+#
+# This comment used to end "The module imports nothing third-party at module
+# scope, so loading it is cheap for suites that never use the marker." The first
+# half is true of the module and irrelevant; the second half is false. Importing
+# the plugin runs opik_rigor/__init__.py, which re-exports .distribution, which
+# imports numpy -- a measured +88.7ms on `pytest --collect-only` in a foreign
+# 16-test project, paid by every pytest process on the machine whether or not any
+# test uses the marker (minimum of 15 interleaved runs against `-p no:rigor`).
+# See the note in integrations/pytest_plugin.py for why deferring this module's
+# own imports does not fix it, and what would.
 [project.entry-points.pytest11]
 rigor = "opik_rigor.integrations.pytest_plugin"
 
@@ -106,6 +131,37 @@ markers = [
   "requires_network: test needs a live provider endpoint (deselected by default in CI)",
   "requires_opik: test needs a reachable Opik instance",
 ]
+
+# Strict, because `py.typed` claims exactly that. The marker tells a downstream
+# user's checker to trust these annotations; anything less than --strict here would
+# be promising a standard the package does not hold itself to.
+#
+# Scope is `src` only. The test suite is not type-checked: it exists partly to feed
+# deliberately wrong types into the validators (`assert_pass_rate("nonsense", ...)`)
+# and a checker would be correct to reject every one of those calls.
+[tool.mypy]
+strict = true
+files = ["src"]
+mypy_path = "src"
+
+# The four modules below are imported *inside functions*, never at module scope, and
+# each is either optional or untyped. None of them appears in a public signature --
+# `_mannwhitneyu()` is annotated `-> Any` precisely so that SciPy's absent types
+# cannot leak into `assert_no_regression`'s -- so silencing them here does not widen
+# anything a consumer can see.
+#
+# anthropic / openai / opik are optional extras: a minimal `pip install opik-rigor`
+# does not have them, and the adapters raise a helpful AdapterError when the import
+# fails. Type-checking the package must not require installing every provider SDK.
+#
+# scipy is a *hard* dependency and is still listed here, which is worth stating
+# plainly: as of scipy 1.18 the package ships no `py.typed` marker anywhere, so it
+# has no inline types at all. Third-party `scipy-stubs` exists but is not depended on
+# -- it would be a build-time dependency added to satisfy a checker rather than the
+# code. If scipy ever ships its own marker, delete this override and see what breaks.
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "openai.*", "opik.*", "scipy.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

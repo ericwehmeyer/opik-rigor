@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Protocol, runtime_checkable
+from typing import NoReturn, Protocol, runtime_checkable
 
 #: Environment variables consulted by the shipped adapters.
 ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
@@ -44,6 +44,31 @@ class AdapterError(Exception):
 
 #: Constructor keywords that would smuggle a secret into a call site.
 CREDENTIAL_KWARGS = ("api_key", "key", "token", "secret")
+
+#: The annotation for every adapter's ``**forbidden`` catch-all.
+#:
+#: The catch-all exists so that :func:`reject_credential_kwargs` can raise a
+#: *named* ``TypeError`` on ``api_key=...`` instead of letting Python raise a
+#: generic one -- the message is the whole point, because it tells the caller to
+#: use the environment instead. But the annotation it carried, ``object``, told
+#: every type checker the opposite of what the runtime does: ``object`` accepts
+#: any value, so ``AnthropicAdapter("m", api_key="sk-...")`` type-checked clean
+#: under both ``mypy --strict`` and ``pyright`` in strict mode and then raised at
+#: runtime. That is the exact call this package exists to prevent, written the
+#: most natural way a user would write it, and the ``py.typed`` marker promised a
+#: checker would catch it.
+#:
+#: ``NoReturn`` is the bottom type: no value is assignable to it, so *any*
+#: keyword reaching the catch-all is a static error, matching the runtime rule
+#: that every unexpected keyword raises. Spelled ``NoReturn`` rather than
+#: ``Never`` only because ``Never`` landed in ``typing`` in 3.11 and this package
+#: supports 3.10; the two are the same type to both checkers.
+#:
+#: This costs nothing at runtime -- every adapter module uses
+#: ``from __future__ import annotations``, so the annotation is never evaluated --
+#: and it does not break ``Adapter(**config)`` forwarding, because ``Any`` remains
+#: assignable to ``NoReturn``.
+ForbiddenKwarg = NoReturn
 
 
 def reject_credential_kwargs(kwargs: Mapping[str, object], class_name: str) -> None:

@@ -854,6 +854,101 @@ def check_wheel_py_typed(wheel: Path, repo: Path) -> Result:
     return ok(name, f"{member} is inside {wheel.name}", evidence)
 
 
+#: Modules that `opik_rigor` imports *inside functions* and that a checker cannot
+#: resolve in a minimal environment. Mirrors the `[[tool.mypy.overrides]]` block in
+#: pyproject.toml, and is spelled out again here because the wheel does not carry
+#: pyproject.toml -- this check configures mypy from scratch against an extracted
+#: zip, exactly as a downstream user's checker would meet it.
+#:
+#: anthropic / openai / opik are optional extras. scipy is a hard dependency that,
+#: as of 1.18, ships no py.typed marker at all and so has no inline types.
+UNTYPED_OR_OPTIONAL_IMPORTS = ("anthropic.*", "openai.*", "opik.*", "scipy.*")
+
+
+def check_wheel_annotations(probe: Probe, wheel: Path) -> Result:
+    """`py.typed` is a promise about the annotations; this is the check that it is true.
+
+    `wheel-py-typed` proves the marker is in the zip. The marker's *meaning* is
+    "a downstream type checker should trust the inline annotations in this
+    package" -- and nothing established that they deserve it. A wrong annotation
+    behind a py.typed marker is worse than no marker at all: it does not merely
+    fail to help, it fails the build of every downstream project running mypy or
+    pyright in strict mode, and they cannot opt out short of an ignore rule.
+
+    The subject is the extracted wheel, never `src/`, for the same reason as every
+    other check here: `packages = [...]`, a build backend change or a stray
+    `.gitignore` rule can make the two differ, and it is the zip that ships.
+
+    Found by running it the first time: three adapter constructors annotated their
+    credential-rejecting catch-all `**forbidden: object`, which told every checker
+    that `AnthropicAdapter("m", api_key="sk-...")` was fine. It raises TypeError at
+    runtime -- that call is the exact mistake this package exists to prevent, and
+    the marker promised a checker would catch it. See `ForbiddenKwarg`.
+    """
+    name = "wheel-annotations"
+    if not _module_available("mypy"):
+        return skipped(
+            name,
+            "mypy is not installed in this interpreter",
+            [
+                f"interpreter: {sys.executable}",
+                'fix: python -m pip install -e ".[typecheck]"',
+                "the py.typed promise is therefore UNVERIFIED, not passed",
+            ],
+        )
+
+    # A config written next to the extracted wheel rather than flags on the command
+    # line: `--ignore-missing-imports` is global, and globally ignoring unresolved
+    # imports in a check whose job is to find broken annotations would hide the one
+    # failure mode that matters most -- a module the wheel forgot to ship.
+    config = probe.workdir / "wheel-mypy.ini"
+    sections = "\n\n".join(
+        f"[mypy-{module}]\nignore_missing_imports = True" for module in UNTYPED_OR_OPTIONAL_IMPORTS
+    )
+    config.write_text(f"[mypy]\nstrict = True\n\n{sections}\n", encoding="utf-8")
+
+    target = probe.extract / IMPORT_NAME
+    proc = run(
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--config-file",
+            str(config),
+            "--no-incremental",
+            str(target),
+        ],
+        cwd=probe.workdir,
+        env={
+            **os.environ,
+            "NO_COLOR": "1",
+            "FORCE_COLOR": "0",
+            # Inside the scratch dir so a release check never writes a cache into
+            # the tree it is verifying.
+            "MYPY_CACHE_DIR": str(probe.workdir / ".mypy_cache"),
+        },
+    )
+    lines = plain_lines(proc.stdout + proc.stderr)
+    ignored = ", ".join(UNTYPED_OR_OPTIONAL_IMPORTS)
+    evidence = [
+        f"subject: {target} (extracted from {wheel.name})",
+        f"config: strict = True; ignore_missing_imports for {ignored}",
+        *tail("\n".join(lines), 20),
+    ]
+    if proc.returncode != 0:
+        return bad(
+            name,
+            f"mypy --strict rejected the wheel's own annotations (exit {proc.returncode})",
+            evidence
+            + [
+                "py.typed tells a downstream checker to trust these annotations.",
+                "Fix the annotations, or remove the marker -- but do not ship both",
+                "a marker and annotations that fail the standard it claims.",
+            ],
+        )
+    return ok(name, f"mypy --strict is clean on {IMPORT_NAME} as shipped in {wheel.name}", evidence)
+
+
 def check_wheel_example_rubric(wheel: Path, repo: Path) -> Result:
     """The worked example rubric must be in the wheel and match the tree byte for byte.
 
@@ -1595,6 +1690,7 @@ def check_readme_symbols(probe: Probe, repo: Path, wheel: Path) -> Result:
 
 WHEEL_DERIVED = (
     "wheel-py-typed",
+    "wheel-annotations",
     "wheel-example-rubric",
     "wheel-rubric-importable",
     "wheel-exports-importable",
@@ -1671,6 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             probe = Probe(extract=extract_wheel(wheel, workdir), workdir=workdir, deps=deps)
             emit(check_wheel_py_typed(wheel, repo))
+            emit(check_wheel_annotations(probe, wheel))
             emit(check_wheel_example_rubric(wheel, repo))
             emit(check_resources_isolated(probe, wheel))
             emit(check_exports_importable(probe, wheel, repo))

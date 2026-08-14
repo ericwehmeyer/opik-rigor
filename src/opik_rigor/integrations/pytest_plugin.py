@@ -21,14 +21,42 @@ recorded as ``Run.error`` and lands in the exception bucket, and both counts are
 printed before the gate runs so the two are distinguishable in the output.
 
 **Nothing here imports Opik.** Opik ships its own ``pytest11`` entry point named
-``opik``; ours is named ``opik_rigor``, uses a marker rather than a function decorator,
-and prefixes every marker, fixture and ini option with ``opik_rigor``. Loading both
+``opik``; ours is named ``rigor``, uses a marker rather than a function decorator,
+and prefixes every marker, fixture and ini option with ``rigor``. Loading both
 changes nothing about either. See ``COMPATIBILITY.md``.
+
+(This paragraph said the entry point was named ``opik_rigor`` and that the
+prefix was ``opik_rigor`` until both were corrected against ``pyproject.toml``'s
+``[project.entry-points.pytest11]`` stanza and ``MARKER_NAME``, which say
+``rigor``. Nothing depended on the docstring, so nothing broke -- but the one
+file a reader opens to check the anti-collision claim was stating the collision
+name wrongly.)
 
 **Importing this module does no work.** It defines hooks and fixtures and nothing
 else -- no file is opened, no config is read, no network is touched. An entry-point
 plugin is imported in every pytest process on the machine, including ones that
 never use it, so anything expensive at import time is a tax on unrelated suites.
+
+**That last claim is currently false, and the cost is measured.** In a foreign
+16-test project with opik-rigor installed, ``pytest --collect-only`` cost
+**+88.7ms** with this plugin enabled versus ``-p no:rigor`` -- minimum of 15
+interleaved runs, same interpreter, same environment, so the delta is this plugin
+and nothing else. ``-X importtime`` attributes it to ``numpy`` (~105ms of the
+``opik_rigor`` import), and every pytest process on the machine pays it.
+
+The cause is **not** this module's own imports, and that matters because it is
+the obvious wrong fix. Deferring the four ``opik_rigor.*`` imports below into the
+hook and fixtures was tried and measured: it changes nothing, because importing
+``opik_rigor.integrations.pytest_plugin`` necessarily executes the parent
+``opik_rigor/__init__.py``, which eagerly re-exports ``.distribution``, which
+imports numpy. Nothing this module does can avoid its own package's ``__init__``.
+
+Making it true would mean giving ``opik_rigor/__init__.py`` PEP 562 lazy
+re-exports (a module-level ``__getattr__``). That is a change to the package's
+front door rather than to this plugin -- it moves when an attribute error
+surfaces, and ``verify_release.py``'s ``wheel-exports-importable`` check and
+``tests/test_import_cost.py`` both probe that surface -- so it is left as a
+deliberate decision for the package owner, not made in passing here.
 """
 
 from __future__ import annotations
@@ -50,7 +78,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, keeps import cost at zero
     from opik_rigor.adapters.base import Adapter
     from opik_rigor.sampling import SampleResult
 
-#: The marker, the fixtures and the ini option are all ``opik_rigor``-prefixed. The
+#: The marker, the fixtures and the ini option are all ``rigor``-prefixed. The
 #: plugin shares a process with whatever else the user has installed, and an
 #: unprefixed name like ``repeat`` or ``evidence`` is a collision waiting for the
 #: one suite that already had its own.
@@ -146,7 +174,16 @@ def _marker_arguments(marker: pytest.Mark) -> dict[str, Any]:
         )
     # strict=False on purpose: the positional form is a prefix, so fewer args than
     # names is the ordinary case rather than a mismatch.
-    supplied = dict(zip(_POSITIONAL, marker.args, strict=False))
+    #
+    # Annotated dict[str, Any] rather than left to inference: _POSITIONAL is a
+    # tuple of string *literals*, so a checker infers the key type as
+    # Literal["n", "min_rate", "confidence", "errors_as_failures"] -- which then
+    # rejects the .update() below (marker.kwargs is Mapping[str, Any]) and the
+    # dict[str, Any] return. Widening the declaration is the fix; narrowing the
+    # return type to the Literal would be worse, because the keys really are
+    # arbitrary strings until the `unknown` check three lines down proves they
+    # are not.
+    supplied: dict[str, Any] = dict(zip(_POSITIONAL, marker.args, strict=False))
     duplicated = sorted(set(supplied) & set(marker.kwargs))
     if duplicated:
         raise TypeError(f"{MARKER_NAME} got repeated argument(s): {', '.join(duplicated)}")

@@ -726,3 +726,54 @@ def test_a_skip_is_reported_as_its_own_status_and_not_as_a_pass():
     conflated."""
     assert vr.skipped("x", "twine is absent").status == vr.SKIP
     assert vr.skipped("x", "twine is absent").status != vr.PASS
+
+
+# ----------------------------------------------------------------------------------
+# wheel-annotations
+# ----------------------------------------------------------------------------------
+
+
+def test_the_wheel_typecheck_ignores_exactly_what_pyproject_ignores():
+    """The two lists must agree, and nothing but this test makes them.
+
+    `check_wheel_annotations` runs mypy against an extracted wheel, which does not
+    contain pyproject.toml -- so the set of unresolvable imports is spelled out a
+    second time in the script. Two copies of a list drift, and the drift is silent
+    in the direction that matters: an entry added to pyproject.toml and forgotten
+    here turns the release gate red for a reason that has nothing to do with the
+    release, and an entry removed from pyproject.toml and left here leaves the gate
+    quietly ignoring a module it should be checking.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - 3.10 only
+        pytest.skip("tomllib needs Python 3.11+, so the two lists are UNVERIFIED")
+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    metadata = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    overrides = metadata["tool"]["mypy"]["overrides"]
+
+    declared: set[str] = set()
+    for override in overrides:
+        if override.get("ignore_missing_imports"):
+            module = override["module"]
+            declared.update([module] if isinstance(module, str) else module)
+
+    assert declared == set(vr.UNTYPED_OR_OPTIONAL_IMPORTS)
+
+
+def test_the_wheel_typecheck_skips_rather_than_passes_when_mypy_is_absent(monkeypatch):
+    """A checker that is not installed has verified nothing.
+
+    Design rule 1 again, and it matters most here: `py.typed` is a promise to a
+    downstream user, and a green row for a check that never ran would be the
+    second false promise stacked on the first.
+    """
+    monkeypatch.setattr(vr, "_module_available", lambda module: False)
+    probe = vr.Probe(extract=Path("nowhere"), workdir=Path("nowhere"), deps=[])
+
+    result = vr.check_wheel_annotations(probe, Path("some.whl"))
+
+    assert result.status == vr.SKIP
+    assert "mypy" in result.summary
+    assert any("UNVERIFIED" in line for line in result.evidence)

@@ -14,11 +14,13 @@ Three properties are load-bearing enough to test rather than assume:
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
 import subprocess
 import sys
 import threading
 import time
+import typing
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -147,6 +149,62 @@ def test_credential_rejection_names_the_keyword_but_never_the_value(
 def test_unknown_keyword_is_still_a_type_error(anthropic_env: str) -> None:
     with pytest.raises(TypeError, match="unexpected keyword"):
         AnthropicAdapter(ANTHROPIC_MODEL, tempreature=0.5)
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [FakeAdapter, AnthropicAdapter, OpenAICompatAdapter],
+    ids=["fake", "anthropic", "openai"],
+)
+def test_the_credential_catch_all_is_annotated_as_the_bottom_type(adapter: type) -> None:
+    """A type checker must reject `api_key=` for the same reason the runtime does.
+
+    The rule this asserts, stated independently of the implementation: every
+    keyword reaching the `**forbidden` catch-all raises at runtime, without
+    exception -- credentials by name, anything else as "unexpected keyword". The
+    type system's way to say "no value may be passed here" is the bottom type,
+    so the catch-all's annotation must resolve to it.
+
+    Annotating it `object` -- which is what all three constructors did -- says the
+    precise opposite: every value is assignable to `object`, so
+    `AnthropicAdapter("m", api_key="sk-...")` type-checked clean under both
+    `mypy --strict` and `pyright` in strict mode and raised TypeError at runtime.
+    That is the exact call `py.typed` promises a checker will catch, written the
+    way a user would naturally write it.
+
+    Checked through `get_type_hints` rather than by reading the source, because
+    these modules use `from __future__ import annotations`: the raw annotation is
+    the *string* "ForbiddenKwarg", and a test that compared strings would keep
+    passing if the alias were later repointed at `object`.
+    """
+    hints = typing.get_type_hints(adapter.__init__)
+    catch_all = [
+        parameter.name
+        for parameter in inspect.signature(adapter.__init__).parameters.values()
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD
+    ]
+    assert catch_all == ["forbidden"], f"{adapter.__name__} has no **forbidden catch-all"
+
+    # NoReturn and Never are the same type; which one `typing` yields depends on
+    # the running Python, so accept either rather than pinning the spelling.
+    assert hints["forbidden"] in (typing.NoReturn, getattr(typing, "Never", typing.NoReturn))
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [FakeAdapter, AnthropicAdapter, OpenAICompatAdapter],
+    ids=["fake", "anthropic", "openai"],
+)
+def test_the_declared_parameters_are_not_swallowed_by_the_bottom_type(adapter: type) -> None:
+    """Narrowing the catch-all must not narrow the real keywords beside it.
+
+    `**forbidden: NoReturn` would be a bad trade if it also made `timeout=30.0`
+    unpassable. The named parameters keep their own annotations; only the
+    catch-all is the bottom type.
+    """
+    hints = typing.get_type_hints(adapter.__init__)
+    assert hints["model_id"] is str
+    assert hints["forbidden"] is not str
 
 
 @pytest.mark.parametrize(

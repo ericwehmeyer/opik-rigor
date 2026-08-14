@@ -626,8 +626,20 @@ def _coerce_scores(data: Any, argument: str) -> tuple[float, ...]:
     """Normalise a :class:`SampleResult` or a sequence of numbers to floats."""
     if isinstance(data, SampleResult):
         return data.scores()
-    if hasattr(data, "scores") and callable(data.scores):
-        return tuple(float(value) for value in data.scores())
+    # Resolved once into a local rather than `hasattr(data, "scores") and
+    # callable(data.scores)`, which looked the attribute up twice and so ran a
+    # property with a side effect twice.
+    #
+    # `produced` is annotated because `callable()` narrows to a callable whose
+    # return type is `object`, and `object` is not iterable -- pyright reports
+    # exactly that in strict mode, inside a package whose py.typed marker
+    # promises it will not. The duck-typed protocol here is genuinely dynamic
+    # (anything with a `.scores()` returning numbers), so `Any` is the honest
+    # annotation rather than a cast that claims to know more than we do.
+    scores_attr = getattr(data, "scores", None)
+    if callable(scores_attr):
+        produced: Any = scores_attr()
+        return tuple(float(value) for value in produced)
     if isinstance(data, (str, bytes)):
         raise ValueError(
             f"{argument} must be a sequence of numbers, got {type(data).__name__} "

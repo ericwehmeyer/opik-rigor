@@ -916,6 +916,63 @@ def test_a_sample_result_feeds_the_gate_through_its_scores() -> None:
     assert report["p10"] == pytest.approx(FIVE_P10, abs=1e-12)
 
 
+def test_anything_with_a_callable_scores_feeds_the_gate() -> None:
+    """The documented input is "a SampleResult or a sequence of numbers", and the
+    SampleResult arm is matched structurally: any object whose ``.scores()``
+    returns numbers is accepted, so a caller's own result type works without
+    subclassing anything.
+    """
+
+    class OwnResult:
+        def scores(self) -> tuple[float, ...]:
+            return tuple(FIVE_SCORES)
+
+    report = assert_score_distribution(OwnResult(), min_mean=2.5)
+
+    assert report["n"] == 5
+    assert report["mean"] == pytest.approx(FIVE_MEAN, abs=1e-12)
+
+
+def test_a_scores_attribute_that_is_not_callable_does_not_capture_the_input() -> None:
+    """`.scores` is matched on being *callable*, not on merely existing.
+
+    A sequence that happens to carry a non-callable ``scores`` attribute is still
+    a sequence of numbers, and must be read as one rather than raising. Pinned
+    because the structural check was rewritten from ``hasattr(data, "scores")``
+    to ``getattr(...)`` + ``callable(...)``, and the two differ exactly here.
+    """
+
+    class NumbersWithAnAttribute(list):
+        scores = "not callable"
+
+    data = NumbersWithAnAttribute(FIVE_SCORES)
+
+    report = assert_score_distribution(data, min_mean=2.5)
+
+    assert report["n"] == 5
+    assert report["mean"] == pytest.approx(FIVE_MEAN, abs=1e-12)
+
+
+def test_the_scores_attribute_is_resolved_exactly_once() -> None:
+    """A property with a side effect must not run twice.
+
+    The old form evaluated ``data.scores`` for ``hasattr`` and again for
+    ``callable``, so a caller whose ``scores`` was a property paid for it twice.
+    One lookup is the contract.
+    """
+    lookups: list[int] = []
+
+    class CountingResult:
+        @property
+        def scores(self):
+            lookups.append(1)
+            return lambda: tuple(FIVE_SCORES)
+
+    assert_score_distribution(CountingResult(), min_mean=2.5)
+
+    assert len(lookups) == 1
+
+
 # --------------------------------------------------------------------------- #
 # assert_no_regression
 # --------------------------------------------------------------------------- #
