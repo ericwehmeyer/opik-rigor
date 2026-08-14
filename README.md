@@ -133,32 +133,36 @@ enforces it — an audit trail you can quietly edit is not an audit trail.
 ## Quickstart
 
 Every code block below was executed in a clean virtualenv holding nothing but the
-published `opik-rigor` 0.1.1 wheel from PyPI, and every message, number and hash
-below is that run's own output. The only editing is hard-wrapping long lines to
-the page width. Nothing is elided, abbreviated, or retyped from memory — where an
-earlier revision of this file showed `...` inside a hash, that was illustrative
-text under a claim of verbatim, and it is gone.
+published `opik-rigor` **0.1.1** wheel from PyPI — the release this one supersedes
+— and every message, number and hash below is that run's own output. Every block
+that prints something was then re-executed unchanged against the 0.2.0 source tree
+on 2026-08-14 and reproduced byte for byte. The install measurements below were
+not re-taken, and name the release they were taken on. The only editing is
+hard-wrapping long lines to the page width. Nothing is elided, abbreviated, or
+retyped from memory — where an earlier revision of this file showed `...` inside a
+hash, that was illustrative text under a claim of verbatim, and it is gone.
 
 ```bash
 pip install opik-rigor
 ```
 
-**What that pulls in.** opik-rigor's own code is 0.33 MB. It requires NumPy and
-SciPy, which come to **180.6 MB on disk** between them (numpy 2.5.2 and scipy
-1.18.0 on CPython 3.14/Windows, counting the `numpy.libs` and `scipy.libs`
-directories that carry the bundled BLAS/LAPACK). NumPy is used by every gate.
-SciPy is used by exactly one function — `assert_no_regression`, for
+**What that pulls in.** opik-rigor's own code is 0.33 MB in 0.1.1, and 0.2.0 adds
+about 32 KB of source to that with the worked-example module described below. It
+requires NumPy and SciPy, which come to **180.6 MB on disk** between them (numpy
+2.5.2 and scipy 1.18.0 on CPython 3.14/Windows, counting the `numpy.libs` and
+`scipy.libs` directories that carry the bundled BLAS/LAPACK). NumPy is used by
+every gate. SciPy is used by exactly one function — `assert_no_regression`, for
 `scipy.stats.mannwhitneyu` — and is imported on first call rather than at package
 import, so a suite that never calls that gate never loads SciPy and does not pay
 for it at import time. Both stay required, so `pip install opik-rigor` continues
 to give you a working `assert_no_regression`.
 
-**What that costs you at the prompt**, which is the number you feel: measured with
-`pip install --no-cache-dir opik-rigor` into an empty virtualenv (Python 3.14.4,
-Windows), **54 seconds**, and the virtualenv grows from **11.5 MiB to 192.8 MiB**
-across four packages. That is the disk figure above plus the interpreter's own
-baseline; nothing else is hiding in it. The `[opik]` extra costs a great deal
-more — see [Optional extras](#optional-extras) before you add it.
+**What that costs you at the prompt**, which is the number you feel: measured on
+0.1.1 with `pip install --no-cache-dir opik-rigor` into an empty virtualenv
+(Python 3.14.4, Windows), **54 seconds**, and the virtualenv grows from **11.5 MiB
+to 192.8 MiB** across four packages. That is the disk figure above plus the
+interpreter's own baseline; nothing else is hiding in it. The `[opik]` extra costs
+a great deal more — see [Optional extras](#optional-extras) before you add it.
 
 A worked example rubric ships **inside the package**, so the install gives you
 something to point the judge at:
@@ -257,18 +261,21 @@ python -m opik_rigor.examples.summarise_eval --seed 7 --n 40
 A module, not a path, deliberately. This line used to read
 `python examples/summarise_eval.py`, and `examples/` is a directory in the git
 tree that is not in the artifact — an install contains `opik_rigor/` and
-`opik_rigor-0.1.1.dist-info/` and nothing else — so the command this quickstart
+`opik_rigor-0.2.0.dist-info/` and nothing else — so the command this quickstart
 ended on could not be run by anyone who had followed the install instruction four
 paragraphs above it. The walkthrough of what it prints, screen by screen, is
 [in the repository](https://github.com/ericwehmeyer/opik-rigor/blob/main/examples/README.md).
 
 > **This one command is the exception to the paragraph at the top of this
-> section.** Everything else here was run against the published 0.1.1 wheel;
-> `opik_rigor.examples` is not in 0.1.1 and reaches PyPI with the next release.
-> A project's long description is frozen at upload, so the page rendered on PyPI
-> for 0.1.1 is the *old* README, ellipses and broken paths and all, and it stays
-> that way until a new version is uploaded. This file self-heals in the
-> repository; the index does not.
+> section.** Everything else here was first run against the published 0.1.1 wheel,
+> and `opik_rigor.examples` is not in 0.1.1 — **0.2.0 is the release that ships
+> it**, so this line was run against the 0.2.0 source tree rather than against a
+> published wheel. If it reports `No module named`, the install predates 0.2.0 and
+> `pip install --upgrade opik-rigor` is the fix rather than a checkout. A
+> project's long description is also frozen at upload, so the page PyPI renders
+> for an earlier version is that version's README — for 0.1.1, ellipses and broken
+> paths and all — and no correction made here ever reaches it. This file
+> self-heals in the repository; the index does not.
 
 ---
 
@@ -301,12 +308,13 @@ wrong about Opik's own documentation are all in
 [COMPATIBILITY.md](https://github.com/ericwehmeyer/opik-rigor/blob/main/COMPATIBILITY.md).
 
 **"Two functions, not a framework" describes rigor's side of the seam, not the
-install.** Measured the same way as the core install above, into its own empty
-virtualenv: `pip install --no-cache-dir "opik-rigor[opik]"` takes **4 minutes 48
-seconds** and produces a **414.9 MiB** virtualenv holding **74 packages**, against
-54 seconds, 192.8 MiB and 4 packages for the bare install. What arrives with it
-includes litellm (101.9 MiB), openai, tokenizers, huggingface-hub, hf-xet,
-tiktoken, sentry-sdk, three `tree-sitter` grammars, pydantic, boto3 type stubs —
+install.** Measured on 0.1.1 the same way as the core install above, into its own
+empty virtualenv: `pip install --no-cache-dir "opik-rigor[opik]"` takes **4
+minutes 48 seconds** and produces a **414.9 MiB** virtualenv holding **74
+packages**, against 54 seconds, 192.8 MiB and 4 packages for the bare install.
+What arrives with it includes litellm (101.9 MiB), openai, tokenizers,
+huggingface-hub, hf-xet, tiktoken, sentry-sdk, three `tree-sitter` grammars,
+pydantic, boto3 type stubs —
 and pytest, which Opik pulls in for its own plugin. Add the extra when you want
 the dashboard; do not add it because the sentence above made it sound small.
 
@@ -360,9 +368,9 @@ interpret.
 
 ## Roadmap
 
-v0.1 is two primitives done rigorously. These are the good ideas that were
-deliberately parked, most of them discovered by writing the example and finding
-the library annoying to use:
+0.2.0 is still two primitives done rigorously; it fixes and packages, and adds no
+third. These are the good ideas that were deliberately parked, most of them
+discovered by writing the example and finding the library annoying to use:
 
 - **A non-raising `check_*` beside each `assert_*`.** Today success returns a
   report dict and failure carries the same numbers on `exc.stats` — and

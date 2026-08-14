@@ -74,22 +74,58 @@ What else is on `main` and not on PyPI:
   was protection by accident of environment, and it is now an allowlist plus a
   test.
 
-#### What to do next, in order
+#### Awaiting decision — 0.2.0 is staged, unpushed, 2026-08-14
 
-1. **Decide the version number.** `confidence <= 0.5` is the only non-additive
-   change. 0.1.2 says "bug fix"; 0.2.0 says "we removed accepted inputs". The
-   consumer (`model-migration-kit`) pins `>=0.1.1,<0.2`, so **0.2.0 would not
-   reach it without a bound change there** — which is an argument for 0.1.2 and
-   also exactly the kind of argument that should be made deliberately rather than
-   by default.
-2. **Ship it.** The two Anthropic blockers are both fixed on `main` and neither is
-   published, so today `pip install opik-rigor` still cannot judge with a current
-   model. That is the strongest reason to cut a release soon.
-3. **Note the README problem.** PyPI freezes the long description at upload, so
-   0.1.1's project page keeps its old README — including the dead
-   `examples/summarise_eval.py` command — until a new version goes up. It does not
-   self-heal.
-4. Items 20 and 21 below are open and neither blocks a release.
+**The version question above is answered: 0.2.0.** `confidence <= 0.5` removes an
+input that used to be accepted and answered, and this project reserved 0.2 for
+changes that alter what a recorded sample means. The counter-argument was real and
+is now a consequence rather than an objection: `model-migration-kit` pins
+`>=0.1.1,<0.2`, so **0.2.0 does not reach the consumer until that bound moves**,
+which is deliberate — the pin holds until somebody reads the breaking change and
+moves it on purpose.
+
+Everything below is done and verified locally. **Nothing has been pushed and
+nothing has been published.**
+
+| Step | State |
+|---|---|
+| Version bumped in `pyproject.toml` + `__init__.py` | done — `version-coherence` reports all 5 sources agree on 0.2.0 |
+| `CHANGELOG.md` 0.2.0 section, breaking change leading | done |
+| `COMPATIBILITY.md` records the outward contract change | done |
+| `README.md` version-dependent claims re-scoped | done |
+| `docs/release-notes-0.2.0.md` drafted | done |
+| Full suite | **1046 passed, 11 skipped, 1 xfailed** (`pytest tests examples`) |
+| Release gate | **17 passed, 0 failed, 0 flagged** (`scripts/verify_release.py`) |
+| Artifacts in `dist/` + `twine check` | built, both PASSED |
+| Annotated tag `v0.2.0` | created locally, **not pushed** |
+
+**The one command sequence to fire it** (each step is yours, not the loop's):
+
+```bash
+git push origin main            # publishes the commit
+git push origin v0.2.0          # publishes the tag -> triggers publish.yml
+```
+
+Publishing is trusted-publisher OIDC on tag push; the registrations already exist
+and must not be redone (see below). After it lands, verify with
+`pip install --no-cache-dir opik-rigor` into an empty venv and check
+`opik_rigor.__version__`.
+
+**Then, and only then, Phase B:** move `model-migration-kit`'s pin to
+`>=0.2,<0.3`, and grep that repo for any `confidence` at or below 0.5 — including
+`@pytest.mark.rigor_repeat(confidence=...)`, which is not a name in `__all__`.
+`Thresholds.confidence` there validates on the open interval `(0, 1)`
+(`judging.py:121`) and hands the value to `assert_pass_rate`
+(`comparison.py:1243`), so a config saying `confidence = 0.3` is accepted there
+and raises here.
+
+#### Still true, and unblocked by the above
+
+- **The README problem is why the release matters.** PyPI freezes the long
+  description at upload, so 0.1.1's project page keeps its old README — including
+  the dead `examples/summarise_eval.py` command — until a new version goes up. It
+  does not self-heal.
+- Items 20 and 21 below are open and neither blocks a release.
 
 #### Three lessons this session, all the same shape
 

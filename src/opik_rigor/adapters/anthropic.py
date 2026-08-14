@@ -15,7 +15,7 @@ Sampling parameters
 
 ``temperature`` defaults to ``None``, which means **the key is absent from the
 request**, not that some value is chosen for you. That default was ``0.0`` until
-0.1.2, and it made this adapter unusable: ``temperature``, ``top_p`` and ``top_k``
+0.2.0, and it made this adapter unusable: ``temperature``, ``top_p`` and ``top_k``
 were removed from the Messages API on the current generation of models, and
 sending any of them returns a 400. A judge built the way the README builds one
 could not complete a single call.
@@ -30,7 +30,7 @@ rot.
 
 What it costs: an older model that still accepts sampling parameters now gets the
 API default rather than ``0.0`` unless you ask. If you are pinned to such a model
-and want the pre-0.1.2 request, pass ``temperature=0.0`` explicitly -- it is sent
+and want the pre-0.2.0 request, pass ``temperature=0.0`` explicitly -- it is sent
 unchanged. On a current model that lever no longer exists at all, and passing a
 value is refused at construction rather than turned into a 400 mid-run.
 """

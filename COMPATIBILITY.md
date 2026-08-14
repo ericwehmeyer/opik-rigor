@@ -212,6 +212,44 @@ The one real documentation note that survives: the page
   the real signature ends in `**ignored_kwargs`, confirmed by introspecting the
   installed package, so an unrecognised keyword is swallowed rather than raising.
 
+## The other direction: what rigor promises its own consumers
+
+Everything above is rigor reading a vendor from outside. rigor is also somebody
+else's vendor, and one thing in this release needs recording on that side.
+
+**0.2.0 (`pyproject.toml:7`, released 2026-08-14) narrows an accepted input.** A
+`confidence` at or below 0.5 is refused where 0.1.1 accepted it and answered. The
+refusal is `_validate_gating_confidence` (`src/opik_rigor/distribution.py:189`),
+which raises `ValueError`. It reaches exactly two exported names —
+`wilson_lower_bound` (line 293) and `assert_pass_rate` (line 759) — and, through
+`assert_pass_rate`, the pytest marker `rigor_repeat(confidence=...)`, which passes
+its value on unchecked (`integrations/pytest_plugin.py:339`) and so raises the
+same `ValueError` from inside a test run. `wilson_interval` (line 328) is
+deliberately untouched and keeps the full open interval: its `z` is
+`ppf((1 + c) / 2)`, non-negative for every `c` in `(0, 1)`, so it never inverts.
+
+**That is why the minor moved and not the patch.** Every other change in this
+release is additive. This one is an input that used to be answered and is now an
+exception, which is a break under semver even though the answers it used to give
+— a "lower bound" above the observed rate, falling as n grows — are the ones the
+module exists to refuse. Correct-but-unwanted output becoming an error is still
+output a consumer may have been reading.
+
+**The outside-in record of rigor's public surface is not in this repository.** It
+is §1 of `../migration-kit/COMPATIBILITY.md`, written by introspecting the
+published wheel rather than this tree — the same method as the table at the top of
+this file, pointed at rigor. Do not mirror it here; a second copy written from the
+source tree would describe something no user installs.
+
+**A pinned consumer does not get 0.2.0.** That file is verified against 0.1.1 and
+declares `opik-rigor>=0.1.1,<0.2`, which does not admit 0.2.0 at all — the pin
+holds until somebody moves it on purpose, in that repository, having read this.
+What it is holding back, concretely: migration-kit validates its
+`Thresholds.confidence` on the open interval `(0, 1)`
+(`src/model_migration_kit/judging.py:121`) and hands it straight to
+`assert_pass_rate` (`src/model_migration_kit/comparison.py:1243`), so a config
+file saying `confidence = 0.3` is accepted there and raises here.
+
 ## What to do when this drifts
 
 The integration is two functions in `src/opik_rigor/integrations/opik.py`. If an Opik

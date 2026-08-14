@@ -7,7 +7,57 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Four independent reviews of the published 0.1.1 wheel, landing together.
+Nothing yet. Both items under *Not fixed, and why* in 0.1.1 below are still open:
+`SampleResult.completed` still filters out a run whose classifier raised, and the
+`Adapter` protocol still exposes no token usage. Each changes what a recorded
+sample means, so each waits for the minor after this one.
+
+## [0.2.0] - 2026-08-14
+
+**This release refuses input that 0.1.1 accepted and answered, and that is the
+entire reason the number is 0.2.0 rather than 0.1.2.** `wilson_lower_bound` and
+`assert_pass_rate` now raise `ValueError` on a `confidence` at or below 0.5. **A
+confidence at or below 0.5 produces an interval that means nothing, and the
+library will no longer manufacture false evidence out of one.**
+
+Below 0.5 the one-sided `z = ppf(c)` is negative, so the "lower bound" comes out
+*above* the observed rate and gets **worse** as the sample grows:
+`wilson_lower_bound(89, 100, 0.0001)` is 0.9615, and the same rate over 1000 runs
+gives 0.9216. At exactly 0.5 the z is zero and the bound *is* `successes / n`, so
+`assert_pass_rate((20, 20), 1.0, confidence=0.5)` passed — twenty runs proving
+perfection, which is the claim the module's opening paragraph exists to refuse.
+Every one of those numbers was arithmetically correct at the level asked for,
+which is why this is a narrowed domain and not a corrected formula: a gate
+written `confidence=0.3` reads in a test file as an act of caution and was looser
+than comparing the raw rate. A one-sided bound is a floor you are willing to
+defend, and there is no level of belief below a coin flip that anyone defends.
+
+**Migration is one line: raise the confidence above 0.5, or drop the argument and
+take the 0.95 default.** If what you actually want is the full two-sided range,
+`wilson_interval` is the escape hatch and is unaffected — its z is
+`ppf((1 + c) / 2)`, non-negative across the whole open interval, so it never
+inverts, and it is deliberately not routed through the new check.
+
+**A third surface reaches the refusal, and it is not in `__all__`.** The pytest
+marker `@pytest.mark.rigor_repeat(n=..., min_rate=..., confidence=...)` hands its
+`confidence` to `assert_pass_rate` unvalidated — the plugin fills in the default
+and type-checks only `errors_as_failures` — so a suite carrying `confidence=0.3`
+on a marker goes from running to erroring, and the failure now arrives *after*
+the runs have been spent rather than before. That is the zero-configuration
+surface this project argues for, and because the marker is not a name in
+`__all__`, a consumer auditing `__all__` for breakage does not see it. Grep your
+suite for `rigor_repeat` as well as for the two function names.
+
+**`model-migration-kit` pins `opik-rigor>=0.1.1,<0.2`**, so 0.2.0 does not reach
+it until that bound moves. 0.1.1 published its additions as a PATCH to keep that
+consumer's upgrade path open and recorded that the reservation of 0.2 stood for
+changes that alter what a recorded sample means. This is the release that spends
+it, and it spends it on exactly one change: everything else here is additive —
+nothing renamed, no other signature narrowed, and no gate's verdict moved for
+input either function still accepts.
+
+The rest of the release is four independent reviews of the published 0.1.1
+wheel, landing together.
 
 The fourth is the odd one out and is listed first because it is the one a new
 reader meets first: a cold-start stranger who installed `opik-rigor` 0.1.1 from
@@ -22,8 +72,8 @@ remaining nine defects are the last nine entries under **Fixed**.
 **None of the documentation work reaches an existing release.** A project's long
 description is frozen at upload time, so the page PyPI renders for 0.1.1 is the
 old README — dead links, elided hashes, an unrunnable example — and stays that way
-until a new version is uploaded. Those fixes reach readers with the next version,
-not before.
+until a new version is uploaded. Those fixes reach readers with 0.2.0, and not
+one of them reaches a reader of 0.1.1's page.
 
 The first of the numerical reviews was adversarial, working by derivation rather
 than by reading this code: bisection on the score-test inequality, exact `Fraction`
@@ -31,27 +81,27 @@ arithmetic, and full brute-force scans. It confirmed that the Wilson bounds are
 exact to 2.2e-16 across 105 grid points, that nothing anywhere conflates
 one-sided with two-sided, that the pass-rate gate never gates on the point
 estimate, that Mann-Whitney's direction and statistic are right, and that the
-realised type-I error is calibrated at 0.048. It found the first seven defects
-under **Fixed**. The next measured what `import opik_rigor` costs, and produced
-the first entry under **Changed**. The last came from outside the numbers
+realised type-I error is calibrated at 0.048. It found seven defects: the
+confidence refusal above, which is the first entry under **Changed**, and six
+under **Fixed** — the infinity gate, both `_runs_needed` defects, the two
+refusals that named a type instead of a value, the numpy count pair, and the
+wrong worked example in the `_wilson` docstring. The next measured what
+`import opik_rigor` costs, and produced the SciPy entry under **Changed**. The
+last came from outside the numbers
 entirely — an agent designing a third consumer, which could not construct a judge
 at all — and produced the two `is_pinned` entries in the middle of **Fixed**, the
 defect `PROGRESS.md` recorded as item 16.
-
-**One change here is not additive**, and it is the only one: `wilson_lower_bound`
-and `assert_pass_rate` now refuse a `confidence` at or below 0.5, which they used
-to accept and answer. Everything else is purely additive — nothing renamed, no
-other signature narrowed, and no gate's verdict moved for input either of them
-still accepts. The items under *Not fixed, and why* below remain queued for 0.2,
-which is where this project puts changes that alter what a recorded sample means.
 
 ### Fixed
 
 - **`AnthropicAdapter` could not call any current Anthropic model.** It sent
   `temperature` on every request, with a constructor default of `0.0`, and
   `temperature`/`top_p`/`top_k` were removed from the Messages API on the current
-  generation — Opus 5, Opus 4.8, Opus 4.7, Sonnet 5 and Fable 5 return a **400**
-  for any of them. There was no way to construct an adapter that avoided it:
+  generation — Opus 5, Opus 4.8, Opus 4.7, Fable 5 and Mythos 5 return a **400**
+  for any of them, and Sonnet 5 returns one for any *non-default* value, which
+  comes to the same thing here because the only reason to pass the parameter is
+  to set a value that is not the default. There was no way to construct an
+  adapter that avoided it:
   the parameter had no omit-sentinel, the constructor rejected `None`, and the
   value was passed unconditionally. A judge built the way the README builds one
   could not complete a single call.
@@ -98,18 +148,6 @@ which is where this project puts changes that alter what a recorded sample means
   score. The property was sound and its input domain stopped short of the defect,
   which is the more useful half of the finding. Non-finite scores now sit in that
   file's refusal table instead, where a refused input belongs.
-- **A one-sided confidence at or below 0.5 is refused instead of inverting the
-  gate.** `z = ppf(c)` is negative below 0.5, so `wilson_lower_bound` returned a
-  "lower bound" *above* the observed rate that got **worse** as the sample grew:
-  `wilson_lower_bound(89, 100, 0.0001)` is 0.9615 and the same rate over 1000 runs
-  gives 0.9216. At exactly 0.5 the z is zero and the bound *is* `successes / n`,
-  so `assert_pass_rate((20, 20), 1.0, confidence=0.5)` passed — twenty runs
-  proving perfection, which is the claim the module's opening paragraph exists to
-  refuse. Every one of those numbers was arithmetically correct at the level asked
-  for, which is why this is a narrowed domain and not a corrected formula: a gate
-  written `confidence=0.3` reads in a test file as an act of caution and was
-  looser than comparing the raw rate. Two-sided `wilson_interval` is immune (its z
-  is `ppf((1 + c) / 2)`, never negative) and keeps the full open interval.
 - **`_runs_needed` reported a number that was not the one it promised.** Its
   docstring claimed the smallest n at which the observed rate clears the bar, and
   justified a binary search with "the bound is monotone in n for fixed p". That is
@@ -180,6 +218,24 @@ which is where this project puts changes that alter what a recorded sample means
   that was reported. The same table refuses `gpt-5` and `gpt-4`;
   `gpt-4o-2024-08-06` and `gpt-4.1-2025-04-14` are unaffected.
 
+- **`py.typed` was a false claim.** The marker tells a downstream checker to trust
+  this package's annotations, and the annotations could not catch the error they
+  existed to catch: `AnthropicAdapter(..., api_key="sk-…")` type-checked clean
+  under mypy *and* pyright and raised `TypeError` at runtime, because the
+  `**forbidden: object` that guarded the credential keywords accepts every
+  keyword. It is `NoReturn` now, so passing one is a type error where the caller
+  is looking at it. The gate moved with it: `verify_release.py` runs
+  `mypy --strict` against the **extracted wheel** rather than the source tree,
+  because the claim `py.typed` makes is about the artifact.
+
+- **The sdist swept in the working directory.** A local build produced 122
+  members — 71 of them a second copy of the tree under `.claude/worktrees/`, plus
+  25 `.remember/` files. **The published 0.1.1 sdist is clean**, verified by
+  downloading it: CI builds from a fresh checkout where those directories do not
+  exist. That is the point worth stating rather than the leak — the artifact was
+  protected by an accident of where it happened to be built, which is not a
+  property anyone can rely on. It is an explicit allowlist plus a test now.
+
 - **Four repo-relative links in `README.md` 404 from the PyPI project page**
   (`LICENSE` twice, `examples/`, `COMPATIBILITY.md`). PyPI renders a long
   description with no repository, no branch and no directory behind it. All are now
@@ -244,6 +300,27 @@ which is where this project puts changes that alter what a recorded sample means
   README now gives both.
 
 ### Changed
+
+- **A one-sided `confidence` at or below 0.5 is refused instead of inverting the
+  gate.** The release's only non-additive change, argued at the top of this
+  section. `wilson_lower_bound` and `assert_pass_rate` are the whole of the
+  affected surface: they are the only two callers of the validator, and
+  `wilson_interval` is deliberately not one of them, so the two-sided interval
+  still spans the full open unit interval of confidences. The refusal is
+  hard-wrapped here and otherwise verbatim, with `got 0.5` being the value as the
+  caller passed it:
+
+  ```
+  confidence must be greater than 0.5 for a one-sided bound, got 0.5. Below
+  0.5 the z is negative, so the 'lower bound' sits above the observed rate
+  and falls as n grows -- more evidence, worse bound -- and a gate set there
+  is looser than comparing the raw rate. At exactly 0.5 the bound is the raw
+  rate. Use wilson_interval if you want the full range two-sided
+  ```
+
+  It is listed under **Changed** rather than **Fixed** because every number the
+  old code returned was arithmetically correct; what changed is the domain the
+  functions accept, not the formula they evaluate on it.
 
 - **`import opik_rigor` no longer imports SciPy** — 1018.6 ms of warm import
   becomes 247.2 ms, and `assert_pass_rate` 1070.6 ms becomes 251.0 ms, against a
@@ -410,8 +487,9 @@ which is where this project puts changes that alter what a recorded sample means
   quotes, exposed so that a caller, and the test suite, can check the advice
   against the predicate instead of against a proof-read.
 
-**On the pin rule and compatibility.** No signature changed and nothing was
-renamed. Every model id 0.1.1 accepted is still accepted **except `gpt-4.1`**,
+**On the pin rule and compatibility.** No *pinning* signature changed and nothing
+was renamed — the one narrowed signature in this release is the confidence check
+at the top of this section. Every model id 0.1.1 accepted is still accepted **except `gpt-4.1`**,
 which it should not have accepted. Ids that were refused and are now accepted
 cannot break a caller, because the only thing `require_pinned` ever did with them
 was raise.
@@ -701,6 +779,7 @@ Also fixed after the v0.1.0 tag:
   names wrongly. It did not; the fault was in the HTML-to-markdown converter used
   to read it.
 
-[Unreleased]: https://github.com/ericwehmeyer/opik-rigor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ericwehmeyer/opik-rigor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.2.0
 [0.1.1]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ericwehmeyer/opik-rigor/releases/tag/v0.1.0
