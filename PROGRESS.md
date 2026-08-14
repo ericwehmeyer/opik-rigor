@@ -26,6 +26,53 @@ it is a reconstruction.
 | 5 | Phase 3: close the consumer-reported API gaps, additively | **complete** — items 10–15 and item 8's message closed; 534 passed offline / 543 with opik |
 | — | Release 0.1.1 | **v0.1.1 published to PyPI 2026-08-13** — `pip install opik-rigor==0.1.1` |
 | 6 | Documentation defects found by a cold-start stranger installing from PyPI | **complete** — see [Documentation defects](#documentation-defects-found-from-outside-2026-08-14) |
+| 7 | Adversarial review of the published 0.1.1: statistics, pinning, adapters, packaging, typing | **complete, unreleased** — 1039 passed, `verify_release.py` 17/17 |
+
+### Unreleased on `main`, 2026-08-14 — read this before quoting the source tree
+
+**PyPI serves 0.1.1. `main` is well ahead of it, and one change is not additive.**
+Anyone reasoning about what a user gets must read the published wheel, not `src/`.
+The sibling project depends on this library and has been bitten by exactly that
+confusion.
+
+**Needs a version decision before release.** `wilson_lower_bound` and
+`assert_pass_rate` now refuse `confidence <= 0.5`, which they used to accept and
+answer. That is the only signature narrowing in the release — everything else is
+additive — but under semver it is the difference between 0.1.2 and 0.2.0. It is a
+defect fix: below 0.5 the z is negative, so the "lower bound" rose *above* the
+observed rate, more data made it worse, and `assert_pass_rate((20, 20), 1.0,
+confidence=0.5)` **passed** — "twenty runs prove perfection", the exact claim the
+module's opening paragraph exists to refuse.
+
+What else is on `main` and not on PyPI:
+
+- **`is_pinned` was rewritten.** 0.1.1 refuses `claude-opus-5`, `claude-sonnet-5`
+  and `claude-opus-4-8`, accepts `claude-3-7-sonnet-20250219` (retired February
+  2026), and wrongly *accepts* `gpt-4.1`, an OpenAI alias that re-points.
+- **`AnthropicAdapter` sent `temperature` unconditionally**, which every current
+  Anthropic model rejects with a 400 (roadmap item 19). With the pin rule, these
+  were sequential blockers: the gate was the front door locked, the 400 was there
+  being no room behind it. **Both are needed before this library can judge with a
+  current model, and both are unreleased.**
+- **A score-distribution gate returned green on infinite input** — `inf - inf` is
+  `nan`, and `nan > 0.001` is False, so a 0.001 spread gate passed on a sample
+  containing infinity.
+- **`py.typed` was a false claim.** `AnthropicAdapter(..., api_key="sk-…")`
+  type-checked clean under mypy *and* pyright and raised `TypeError` at runtime,
+  because `**forbidden: object` accepts everything. Now `NoReturn`, and
+  `verify_release.py` runs `mypy --strict` against the **extracted wheel**.
+- **`import opik_rigor` went from ~1019 ms to ~303 ms** — scipy is imported lazily
+  and `assert_pass_rate` no longer pulls it at all.
+- **The worked example ships inside the wheel** as `opik_rigor.examples`. The
+  README's headline command previously named `examples/summarise_eval.py`, a path
+  that exists only in a git checkout, and the README also printed a line built
+  from a key (`observed`) that the returned dict does not have.
+- **The sdist was sweeping in the working directory** — a local build produced 122
+  members, 71 of them a second copy of the tree under `.claude/worktrees/` plus 25
+  `.remember/` files. The published 0.1.1 sdist is clean, verified by downloading
+  it; CI builds from a fresh checkout where those directories do not exist. That
+  was protection by accident of environment, and it is now an allowlist plus a
+  test.
 
 ## Session 1 — module status
 

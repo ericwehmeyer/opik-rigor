@@ -61,7 +61,18 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.6", "build>=1.0", "hatchling>=
 # hermetic. It is a documented release-time check instead -- see docs/TYPING.md --
 # and the two checkers disagree only about the package's *internals*, never about
 # what a consumer sees.
-typecheck = ["mypy>=1.11"]
+#
+# `pytest` is here because the wheel ships `integrations/pytest_plugin.py`, which
+# imports it. Without it in the environment, `mypy --strict` over the extracted
+# wheel cannot resolve the import and cascades: one `import-not-found` becomes
+# three `untyped-decorator` errors on `pytest_pyfunc_call`, `rigor_judge` and
+# `rigor_evidence`, and the whole check fails on a wheel whose annotations are
+# fine. It passed locally and failed on its first CI run, because the repo venv
+# has pytest and the build job did not -- the same shape as the `twine check`
+# colour bug: an expectation that quietly encodes the environment it was written
+# in. Note this is a *type-checking* prerequisite, not a runtime one; `pytest`
+# remains an optional extra for the plugin's users.
+typecheck = ["mypy>=1.11", "pytest>=7.0"]
 
 [project.urls]
 Homepage = "https://github.com/ericwehmeyer/opik-rigor"
