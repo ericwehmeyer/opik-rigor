@@ -587,6 +587,49 @@ branch whose subject is import cost.
 the explicit-value path so it can never sit between a default-constructed adapter
 and a working call. See the resolution note at the top of this item.
 
+### 20. The pytest plugin costs every pytest process on the machine 88.7 ms
+
+Measured 2026-08-14: `pytest --collect-only` costs **+88.7 ms** with the plugin
+enabled versus `-p no:rigor` — min of 15 interleaved runs in one environment — and
+it is paid by every suite on the machine, including suites that never use the
+marker. A pytest11 entry point is loaded at interpreter start whether or not
+anything asks for it, which is the price of the zero-configuration discovery
+`COMPATIBILITY.md` argues for, and the argument is still right; the cost was
+simply never stated.
+
+The cause is not the plugin. Importing it runs `opik_rigor/__init__.py`, which
+re-exports `.distribution`, which imports numpy. **Deferring the plugin's own
+imports was tried and measured to change nothing**, and reverted rather than
+shipped as churn with a rationale it had not earned — which is the right instinct
+and worth keeping as the record of what does *not* work.
+
+The real fix is PEP 562 lazy re-exports on the package's front door, and it is not
+obviously worth it: `__getattr__` moves when an `AttributeError` surfaces, and
+`verify_release.py`'s `wheel-exports-importable` check probes exactly that
+surface. So it trades a measured 88.7 ms against a weakened release gate. Open
+deliberately.
+
+### 21. `sample_of()` cannot do the thing its own docstring says it is for
+
+Its docstring says "notably feeding a stored baseline into the regression gate".
+It cannot:
+
+```python
+>>> sample_of([4.0] * 8).scores()
+()
+```
+
+`scores()` harvests `getattr(run.value, "score", None)`, and a float has no
+`.score`, so every value is dropped. With the default outcome all eight runs also
+land in the *errored* bucket. Reproduced against the merged tree on 2026-08-14.
+
+The workaround is trivial — pass the list straight to the gate, since `ScoreData`
+accepts a `Sequence[float]` — so nothing is blocked. Left open because the fix is
+genuinely ambiguous and picking one silently would be the wrong move: either the
+docstring is wrong and should stop advertising the path, or `scores()` should
+accept plain numbers, which widens a public method's contract. That is a decision,
+not a typo.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
