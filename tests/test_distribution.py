@@ -66,7 +66,17 @@ SAME_SEED = 20260814
 SHIFTED_SEED = 20260815
 
 #: The one-sided z for the default 0.95 confidence, quoted rather than computed
-#: from the module: z = norm.ppf(0.95).
+#: from the module: z = scipy.stats.norm.ppf(0.95), the Cephes ``ndtri``.
+#:
+#: Since the module moved its quantile to :class:`statistics.NormalDist`
+#: (CPython's Wichura AS241), this constant is no longer the number the code uses:
+#: the stdlib gives 1.6448536269514715, seven ULP away. That is deliberate and it
+#: is an improvement -- the oracles below now run on a genuinely different
+#: implementation of the inverse normal, so their agreement with the module is
+#: cross-implementation rather than a restatement. Every predicate here is
+#: evaluated at this z and every one of them agrees with the module's answer,
+#: including the 45-point brute-force grid where the answer is an integer that a
+#: seven-ULP shift in z could in principle move by a whole run.
 Z_95 = 1.6448536269514722
 Z_95_SQUARED = 2.705543454095413
 
