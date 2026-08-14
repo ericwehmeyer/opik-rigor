@@ -99,15 +99,30 @@ nothing has been published.**
 | Artifacts in `dist/` + `twine check` | built, both PASSED |
 | Annotated tag `v0.2.0` | created locally, **not pushed** |
 
-**The one command sequence to fire it** (each step is yours, not the loop's):
+**The command sequence to fire it** (each step is yours, not the loop's):
 
 ```bash
 git push origin main            # publishes the commit
-git push origin v0.2.0          # publishes the tag -> triggers publish.yml
+git push origin v0.2.0          # publishes the tag -- this alone publishes NOTHING
+gh release create v0.2.0 --title "v0.2.0" \
+  --notes-file docs/release-notes-0.2.0.md --verify-tag
 ```
 
-Publishing is trusted-publisher OIDC on tag push; the registrations already exist
-and must not be redone (see below). After it lands, verify with
+**Pushing the tag does not publish.** `publish.yml` triggers on
+`release: types: [published]` and on `workflow_dispatch` — never on a tag push. A
+tag only gives the release something to point at. This file said "OIDC on tag
+push" until 2026-08-14 and it was wrong; the first attempt at 0.2.0 pushed the tag
+and waited for an upload that was never going to start.
+
+**`workflow_dispatch` reaches TestPyPI only, and that is deliberate.** The two
+upload jobs are split by event so exactly one is ever eligible per run:
+`testpypi` is `if: github.event_name == 'workflow_dispatch'`, `pypi` is
+`if: github.event_name == 'release'`. A manual dispatch is therefore a real
+rehearsal that cannot touch the live index — use it before cutting a release, and
+do not read its green tick as "published".
+
+Trusted-publisher OIDC, no tokens; the registrations already exist and must not be
+redone (see below). After it lands, verify with
 `pip install --no-cache-dir opik-rigor` into an empty venv and check
 `opik_rigor.__version__`.
 
@@ -127,7 +142,7 @@ and raises here.
   does not self-heal.
 - Items 20 and 21 below are open and neither blocks a release.
 
-#### Three lessons this session, all the same shape
+#### Four lessons this session, all the same shape
 
 A check that passes where it was written and fails only where it matters:
 
@@ -138,10 +153,20 @@ A check that passes where it was written and fails only where it matters:
   sibling had the mirror-image failure the same night.
 - `wheel-annotations` ran `mypy --strict` over a wheel containing
   `import pytest`, in a build job that did not install pytest.
+- **The fix for that last one was applied to `ci.yml` and not to `publish.yml`**,
+  so the release gate ran without mypy in the one workflow that decides whether an
+  artifact ships. `wheel-annotations` skipped, the script exited 2 as designed,
+  and the 0.2.0 publish stopped one step short of the upload reporting *16 passed,
+  0 failed* — a green-looking failure. `ci.yml` had carried a comment predicting
+  this precise outcome since the extra was added. **A lesson recorded in one file
+  is not a lesson applied to the next one**, and this is the first of the four
+  that is now pinned by a test rather than by a comment
+  (`tests/test_workflows.py`).
 
 Each was invisible locally. The general form is worth stating: **an expectation
 can quietly encode the environment of whoever wrote it**, and the only instrument
-that finds that is running it somewhere else.
+that finds that is running it somewhere else. The fourth adds a corollary: when
+the instrument is a checklist item in a comment, the next author does not run it.
 
 ## Session 1 — module status
 
