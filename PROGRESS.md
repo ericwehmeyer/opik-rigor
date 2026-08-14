@@ -178,6 +178,35 @@ here rather than worked around in the caller, per the dependency-direction rule.
     it: if a future release renames `hash_rubric_file`, the consumer's pinned CI
     stays green and its users discover the break on upgrade. Nothing in either
     repo would catch that except the drift canary.
+11. **No `py.typed`, so none of the annotations reach a consumer.** The library is
+    thoroughly annotated and ships no marker file, which under PEP 561 means a
+    type checker ignores every one of them. This is arguably a larger typing gap
+    than item 4, which only concerns the untyped report dicts — and it is one
+    empty file to fix.
+12. **`SampleResult.exceptions` returns `Run` objects, not exceptions.** The
+    obvious line `[str(e) for e in result.exceptions]` yields run reprs, silently.
+    `errored_runs` would name the thing it returns.
+13. **`hash_rubric_text(data: bytes)` takes bytes despite the name**, and passing a
+    `str` fails inside the library on its own `b"\r\n"` literal with
+    `TypeError: replace() argument 1 must be str, not bytes` — a message that
+    describes the inverse of the caller's actual mistake.
+14. **`assert_no_regression` on text reports "current has no scores"** — "you have
+    no data" when the truth is "your data is the wrong shape". Same confusion as
+    item 8, and a caller who is holding 200 completions will not read that message
+    as being about types.
+15. **The wheel ships no rubric.** `rubrics/example-rubric.md` is repo-only, so
+    `pip install opik-rigor` gives you a `PinnedJudge` and nothing to point it at,
+    while `README.md` line 117 points at the unpackaged file. Related, and
+    verified: that example ends with `OUTPUT_FORMAT_INSTRUCTION` while
+    `PROMPT_TEMPLATE` already appends it, so a rubric copied from it carries the
+    format block twice.
+
+Item 8 has a sharper form than the one recorded above, found by the same audit and
+worth stating because it changes how the bug presents: `SampleResult.completed`
+filters on `run.raised`, so when the default classifier raises, `.values` and
+`.outcomes` come back **empty**. The caller does not merely see an extra error —
+the accessor that means "give me the text back" returns nothing at all, and
+`pass_rate=0.0` beside `failures=0` reads as "the system never responded."
 
 ## Decisions made, and why
 
