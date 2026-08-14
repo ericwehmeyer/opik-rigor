@@ -223,16 +223,24 @@ def draw_confidence(rng: random.Random) -> float:
 
 
 def draw_gating_confidence(rng: random.Random) -> float:
-    """A confidence at or above 0.5 -- the half of the domain a gate is set in.
+    """A confidence strictly above 0.5 -- the whole domain of the one-sided bound.
 
     Below 0.5 the one-sided z goes negative and the "lower bound" comes out
-    *above* the observed rate. That is not a defect of the closed form (see
-    :func:`test_a_confidence_below_a_half_turns_the_bound_upside_down`, which pins
-    it) but it inverts every orientation property, so the properties about
-    orientation draw from here and say so.
+    *above* the observed rate; at exactly 0.5 the z is zero and the bound *is* the
+    observed rate. Neither is a defect of the closed form -- each is the correct
+    bound at the level asked for -- but neither is a floor anyone can defend, so
+    :func:`wilson_lower_bound` refuses the lot rather than returning it. See
+    :func:`test_a_confidence_at_or_below_a_half_is_refused_rather_than_inverted`,
+    which pins both the old numbers and the refusal that replaced them.
+
+    Strictly above, not at: the fold below used to return 0.5 unchanged, and 0.5
+    is in :data:`CONFIDENCES`.
     """
     confidence = draw_confidence(rng)
-    return confidence if confidence >= 0.5 else 1.0 - confidence
+    if confidence > 0.5:
+        return confidence
+    folded = 1.0 - confidence
+    return folded if folded > 0.5 else 0.6827
 
 
 def assume_valid_counts(successes: Any, n: Any, confidence: Any) -> None:
@@ -266,11 +274,31 @@ def draw_counts(rng: random.Random) -> tuple[int, int, float]:
     return successes, n, draw_confidence(rng)
 
 
+def draw_gating_counts(rng: random.Random) -> tuple[int, int, float]:
+    """As :func:`draw_counts`, restricted to the confidences a one-sided bound takes.
+
+    Properties that call :func:`wilson_lower_bound` or :func:`assert_pass_rate`
+    unconditionally draw from here: below 0.5 those two now raise, and a property
+    whose generator walks into a documented refusal is testing the refusal.
+    """
+    successes, n, _ = draw_counts(rng)
+    return successes, n, draw_gating_confidence(rng)
+
+
 def draw_scores(rng: random.Random, *, minimum: int = 1, maximum: int = 30) -> list[float]:
     """A sample of judge scores: a 1-5 scale, a 0-1 scale, or arbitrary floats.
 
     Includes all-identical samples (zero variance, where a stddev or a
     rank test degenerates) on purpose.
+
+    **Every draw here is finite, and that was a hole.** While this generator was
+    running, ``assert_score_distribution([1.0, 1.0, inf], max_stddev=0.001)``
+    returned ``passed=True`` with ``stddev=nan``, and the property next door --
+    "no gate ever reports a nan or an infinity in any numeric field" -- held
+    throughout, because no case it was given could produce one. The property was
+    sound; its input domain stopped short of the defect. Non-finite scores are now
+    refused outright by ``_coerce_scores``, so they belong in :data:`REFUSALS`
+    below rather than here, and that is where they are.
     """
     size = rng.randint(minimum, maximum)
     shape = rng.random()
@@ -331,11 +359,15 @@ def test_every_wilson_bound_lies_inside_the_unit_interval() -> None:
         successes, n, confidence = case
         assume_valid_counts(successes, n, confidence)
         lower, upper = wilson_interval(successes, n, confidence)
-        one_sided = wilson_lower_bound(successes, n, confidence)
         assert 0.0 <= lower <= 1.0, f"two-sided lower {lower!r} outside [0, 1]"
         assert 0.0 <= upper <= 1.0, f"two-sided upper {upper!r} outside [0, 1]"
-        assert 0.0 <= one_sided <= 1.0, f"one-sided bound {one_sided!r} outside [0, 1]"
         assert lower <= upper, f"interval is inverted: [{lower!r}, {upper!r}]"
+        # The two-sided interval takes the whole open unit interval; the one-sided
+        # bound is only defined above 0.5 and refuses the rest, so it is asked only
+        # where it answers. Keeping the draw wide preserves the two-sided coverage.
+        if confidence > 0.5:
+            one_sided = wilson_lower_bound(successes, n, confidence)
+            assert 0.0 <= one_sided <= 1.0, f"one-sided bound {one_sided!r} outside [0, 1]"
 
     for_all(
         "wilson bounds lie in [0, 1]",
@@ -354,10 +386,11 @@ def test_the_interval_brackets_the_observed_rate() -> None:
     # a lower confidence bound above the observed rate is the bug that produced
     # wilson_lower_bound(0, 11) == 1.39e-17.
     #
-    # The one-sided half of this is true only at confidence >= 0.5, and that is a
+    # The one-sided half of this is true only above confidence 0.5, and that is a
     # fact about confidence bounds rather than a concession: at c < 0.5 the z is
-    # negative and the bound legitimately sits above the observed rate. The case
-    # this file first drew, (157, 200, 0.2896), is pinned below in its own test.
+    # negative and the bound legitimately sits above the observed rate, and at
+    # exactly 0.5 it equals it. The case this file first drew, (157, 200, 0.2896),
+    # is pinned below in its own test -- as a refusal, which is what it now gets.
     def holds(case: tuple[int, int, float]) -> None:
         successes, n, confidence = case
         assume_valid_counts(successes, n, confidence)
@@ -365,7 +398,7 @@ def test_the_interval_brackets_the_observed_rate() -> None:
         lower, upper = wilson_interval(successes, n, confidence)
         assert lower <= observed, f"two-sided lower {lower!r} above observed {observed!r}"
         assert observed <= upper, f"observed {observed!r} above two-sided upper {upper!r}"
-        if confidence >= 0.5:
+        if confidence > 0.5:
             one_sided = wilson_lower_bound(successes, n, confidence)
             assert one_sided <= observed, (
                 f"one-sided bound {one_sided!r} above observed {observed!r} at "
@@ -402,54 +435,57 @@ def test_the_one_sided_bound_is_never_below_the_two_sided_lower_limit() -> None:
 
     for_all(
         "one-sided bound >= two-sided lower limit",
-        draw_counts,
+        draw_gating_counts,
         holds,
         seed=2026081403,
         cases=CASES_ARITHMETIC,
     )
 
 
-def test_a_confidence_below_a_half_turns_the_one_sided_bound_upside_down() -> None:
+def test_a_confidence_at_or_below_a_half_is_refused_rather_than_inverted() -> None:
     # Found by the generator, at (157, 200, confidence=0.2896), while checking
-    # "the bound never exceeds the observed rate". Pinned here rather than swept
-    # into a precondition, because it is the sharpest edge on this API.
+    # "the bound never exceeds the observed rate". Kept as its own test because it
+    # is the sharpest edge on this API, and rewritten now that the edge is closed.
     #
-    # THE CODE IS RIGHT AND THE PROPERTY WAS TOO BROAD. z = norm.ppf(c) is
-    # negative for c < 0.5, and a lower bound you are only 29% confident in
-    # genuinely sits *above* the point estimate -- P(true rate >= L) = 0.29 has no
-    # solution below p_hat. The closed form is the correct bound at that level.
+    # THE FORMULA WAS NEVER WRONG. z = norm.ppf(c) is negative for c < 0.5, and a
+    # lower bound you are only 29% confident in genuinely sits *above* the point
+    # estimate -- P(true rate >= L) = 0.29 has no solution below p_hat. The closed
+    # form was the correct bound at the level asked for.
     #
-    # It is still a footgun, and the reason to pin it: _validate_unit accepts any
-    # confidence in (0, 1), so assert_pass_rate(result, min_rate, confidence=0.3)
-    # is a gate that is *easier to pass than comparing the raw rate*, while
-    # reading in the test source like a deliberate act of statistical caution.
-    # Nothing in the docstrings says confidence < 0.5 inverts the comparison.
+    # THE DOMAIN WAS. _validate_unit accepted any confidence in (0, 1), so
+    # assert_pass_rate(result, min_rate, confidence=0.3) was a gate *easier to pass
+    # than comparing the raw rate*, while reading in the test source like a
+    # deliberate act of statistical caution, and nothing in the docstrings said so.
+    # wilson_lower_bound now refuses the whole range; wilson_interval keeps it.
+    for confidence in (0.0001, 0.2896, 0.5):
+        with pytest.raises(ValueError, match="confidence must be greater than 0.5"):
+            wilson_lower_bound(157, 200, confidence)
+        with pytest.raises(ValueError, match="confidence must be greater than 0.5"):
+            assert_pass_rate((157, 200), 0.79, confidence=confidence)
+
+    # The refusal names the value it refused, like every other refusal here.
+    with pytest.raises(ValueError, match="0.2896"):
+        wilson_lower_bound(157, 200, 0.2896)
+
+    # What used to happen, recorded so the reason survives the fix: at 0.2896 the
+    # bound came back above the observed rate and cleared a bar the sample missed.
     observed = 157 / 200
-
     assert wilson_lower_bound(157, 200, 0.95) < observed
-    assert wilson_lower_bound(157, 200, 0.5) == pytest.approx(observed, abs=1e-12)
-    assert wilson_lower_bound(157, 200, 0.2896) > observed
+    assert not report_of(assert_pass_rate, (157, 200), 0.79, confidence=0.95)["passed"]
 
-    # The gate inherits it whole: a bar the sample plainly misses is cleared by
-    # asking for less confidence, and the report says "passed" without qualification.
-    strict = report_of(assert_pass_rate, (157, 200), 0.79, confidence=0.95)
-    lax = report_of(assert_pass_rate, (157, 200), 0.79, confidence=0.2896)
-    assert not strict["passed"]
-    assert lax["passed"], "expected the inverted bound to clear a bar above the observed rate"
-    assert lax["lower_bound"] > lax["pass_rate"]
-
-    # The two-sided interval is immune: its z is norm.ppf((1 + c) / 2), which is
-    # non-negative for every c in (0, 1). Only the one-sided bound flips.
+    # The two-sided interval is immune and keeps the full range: its z is
+    # norm.ppf((1 + c) / 2), non-negative for every c in (0, 1). Only the one-sided
+    # bound flipped, so only the one-sided bound narrowed its domain.
     for confidence in (0.0001, 0.2896, 0.5, 0.95):
         low, high = wilson_interval(157, 200, confidence)
         assert low <= observed <= high
 
-    # And the boundary case, which is the one that bites hardest: at exactly 0.5,
-    # z = 0 and the bound *is* the point estimate. The module's opening argument is
-    # that 20/20 must never yield a bound of 1.0 -- at confidence=0.5 it does, and
-    # a gate at min_rate=1.0 passes on twenty runs.
-    assert wilson_lower_bound(20, 20, 0.5) == 1.0
-    assert report_of(assert_pass_rate, (20, 20), 1.0, confidence=0.5)["passed"]
+    # And the boundary case, which bit hardest: at exactly 0.5, z = 0 and the bound
+    # *is* the point estimate. The module's opening argument is that 20/20 must
+    # never yield a bound of 1.0 -- at confidence=0.5 it did, and a gate at
+    # min_rate=1.0 passed on twenty runs. Refused, not documented.
+    with pytest.raises(ValueError, match="confidence must be greater than 0.5"):
+        assert_pass_rate((20, 20), 1.0, confidence=0.5)
     assert not report_of(assert_pass_rate, (20, 20), 1.0, confidence=0.95)["passed"]
 
 
@@ -535,6 +571,18 @@ def draw_two_confidences(rng: random.Random) -> tuple[int, int, float, float]:
     return (successes, n, min(first, second), max(first, second))
 
 
+def draw_two_gating_confidences(rng: random.Random) -> tuple[int, int, float, float]:
+    """As :func:`draw_two_confidences`, with both above 0.5 so both are answerable.
+
+    Ordering after restricting, not before: folding a drawn confidence across 0.5
+    changes which of the pair is larger, and a property about "higher confidence"
+    that sorted first would be comparing the wrong two numbers.
+    """
+    successes, n, _ = draw_counts(rng)
+    first, second = draw_gating_confidence(rng), draw_gating_confidence(rng)
+    return (successes, n, min(first, second), max(first, second))
+
+
 def test_higher_confidence_never_narrows_the_interval() -> None:
     # Wanting to be surer cannot be free. z is increasing in the confidence level
     # and the half-width is increasing in z, so a 99% interval contains the 95% one.
@@ -576,9 +624,12 @@ def test_higher_confidence_never_raises_the_one_sided_bound() -> None:
             f"raised the bound from {loose!r} to {tight!r}"
         )
 
+    # Both confidences above 0.5. Below it the monotonicity genuinely reverses --
+    # that was the "more data, worse bound" finding -- and the bound now refuses
+    # the range rather than reversing quietly.
     for_all(
         "higher confidence never raises the one-sided bound",
-        draw_two_confidences,
+        draw_two_gating_confidences,
         holds,
         seed=2026081407,
         cases=CASES_ARITHMETIC,
@@ -608,7 +659,7 @@ def test_a_shut_out_pins_the_lower_end_to_exactly_zero_and_leaves_the_upper_free
 
     for_all(
         "successes=0 pins the lower end to exactly 0",
-        draw_counts,
+        draw_gating_counts,
         holds,
         seed=2026081408,
         cases=CASES_ARITHMETIC,
@@ -687,7 +738,7 @@ def draw_pass_rate_case(rng: random.Random) -> tuple[int, int, float, float]:
     the one bar no sample size can ever clear, and the gate has a special
     diagnosis for it.
     """
-    successes, n, confidence = draw_counts(rng)
+    successes, n, confidence = draw_gating_counts(rng)
     roll = rng.random()
     if roll < 0.2:
         min_rate = successes / n
@@ -793,10 +844,41 @@ def test_a_passing_pass_rate_report_never_carries_a_runs_needed() -> None:
                 # And the number, when offered, has to be true: at that many runs
                 # and this observed rate the bound really does clear the bar.
                 needed = report["runs_needed"]
-                rounded = min(round(report["pass_rate"] * needed), needed)
-                assert wilson_lower_bound(rounded, needed, confidence) >= min_rate, (
+                observed = report["pass_rate"]
+
+                def bound_at(size: int, observed: float = observed) -> float:
+                    return wilson_lower_bound(
+                        min(round(observed * size), size), size, confidence
+                    )
+
+                assert bound_at(needed) >= min_rate, (
                     f"runs_needed={needed} does not actually clear min_rate={min_rate!r}"
                 )
+                # Sufficiency is not the claim. The number promises the point past
+                # which the bound clears *and keeps clearing*, so both halves are
+                # checked:
+                #
+                # (a) one fewer must fail. Note this is NOT the assertion that
+                #     catches a non-minimal answer -- a binary search converges to
+                #     a point where low clears and low-1 fails whatever the
+                #     predicate does in between, so the pre-fix implementation
+                #     satisfied it in 45 of 45 grid cases while disagreeing with the
+                #     true minimum in 33 of them. It is asserted because it is true
+                #     and cheap, not because it is load-bearing.
+                if needed > 1:
+                    assert bound_at(needed - 1) < min_rate, (
+                        f"runs_needed={needed} is not one past a failure: "
+                        f"{needed - 1} clears min_rate={min_rate!r} too"
+                    )
+                # (b) it must keep clearing above. This is the half that bites:
+                #     successes = round(p*n) makes the predicate oscillate, so an
+                #     n that clears says nothing about n+1. The pre-fix search
+                #     returned 613 where the bound falls back below the bar at 614.
+                for above in range(needed + 1, needed + 40):
+                    assert bound_at(above) >= min_rate, (
+                        f"runs_needed={needed} clears but {above} does not: the "
+                        f"answer is not past the oscillation"
+                    )
 
     for_all(
         "a passing report never carries runs_needed",
@@ -1313,36 +1395,40 @@ REFUSALS: tuple[Any, ...] = (
     pytest.param(
         lambda: assert_score_distribution([1.0, 2.0], max_stddev=-1.0), "-1.0", id="negative-stddev"
     ),
+    # The three below close the hole documented on draw_scores: every score this
+    # file generated was finite, so nothing ever reached the gate that could make
+    # a statistic non-finite, and an infinite score passed a 0.001 stddev bar.
+    pytest.param(
+        lambda: assert_score_distribution([1.0, 1.0, math.inf], max_stddev=0.001),
+        "inf",
+        id="score-is-positive-infinity",
+    ),
+    pytest.param(
+        lambda: assert_score_distribution([1.0, 1.0, -math.inf], min_p10=4.9),
+        "-inf",
+        id="score-is-negative-infinity",
+    ),
+    pytest.param(
+        lambda: assert_no_regression([1.0, math.inf], [1.0, 2.0]),
+        "inf",
+        id="regression-current-is-infinite",
+    ),
     pytest.param(
         lambda: assert_score_distribution([1.0, "2"], min_mean=1.0), "'2'", id="score-as-string"
     ),
+    # Both of these were xfail(strict=True) when this file landed, on the finding
+    # that the refusal named the type and not the value. Fixed in the same commit
+    # that unmarks them: both messages now append _short_repr(value), so a
+    # threshold that arrived from a config file says which string it was.
     pytest.param(
         lambda: assert_score_distribution([1.0, 2.0], min_mean="x"),
         "'x'",
         id="min_mean-as-string",
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "THE CODE IS WRONG, NOT THE PROPERTY -- mildly. The refusal names only "
-                "the type: 'min_mean must be a number or None, got str'. Every other "
-                "refusal in this module quotes the offending value, and a caller who "
-                "passed a threshold through a config file needs to see which string it "
-                "was. One-word fix: add {value!r} to the message."
-            ),
-        ),
     ),
     pytest.param(
         lambda: assert_score_distribution("abc", min_mean=1.0),
         "'abc'",
         id="scores-as-string",
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "THE CODE IS WRONG, NOT THE PROPERTY -- mildly. 'scores must be a "
-                "sequence of numbers, got str' does not say which str. Same one-word "
-                "fix as min_mean-as-string; the two share a habit, not a code path."
-            ),
-        ),
     ),
 )
 

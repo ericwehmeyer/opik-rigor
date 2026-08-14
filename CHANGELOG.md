@@ -7,8 +7,125 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet. The two items under *Not fixed, and why* below are queued for 0.2,
-which is where this project puts changes that alter what a recorded sample means.
+An adversarial numerical review of the published 0.1.1 wheel, by independent
+derivation rather than by reading this code: bisection on the score-test
+inequality, exact `Fraction` arithmetic, and full brute-force scans. It confirmed
+that the Wilson bounds are exact to 2.2e-16 across 105 grid points, that nothing
+anywhere conflates one-sided with two-sided, that the pass-rate gate never gates
+on the point estimate, that Mann-Whitney's direction and statistic are right, and
+that the realised type-I error is calibrated at 0.048. It also found the seven
+things below. The two items under *Not fixed, and why* remain queued for 0.2.
+
+### Fixed
+
+- **A score-distribution gate returned green on infinite input.** This is the
+  worst thing in the release and it is the exact failure the library exists to
+  prevent. `_coerce_scores` refused NaN and never checked for infinity, so
+  `assert_score_distribution([1.0, 1.0, float("inf")], max_stddev=0.001)` computed
+  a standard deviation of `nan` (because `inf - inf` is `nan`), found that `nan >
+  0.001` is False, recorded no violation, and **passed** — a 0.001 spread gate,
+  cleared by a sample containing infinity. `min_p10=4.9` against `-inf` passed the
+  same way, and `assert_no_regression` reported `mean_current=inf` and passed. The
+  only outward sign was a bare `RuntimeWarning: invalid value encountered in
+  subtract` from numpy on stderr, which CI discards. Infinity is now refused where
+  NaN is, with a message that names the value and says what it would have done.
+  The function's own docstring had already made this argument for the `n < 2`
+  case: "reporting it as 0.0 would pass the strictest possible stddev gate on no
+  evidence at all."
+
+  The property suite asserts that no gate ever reports a NaN or an infinity in a
+  numeric field, and that property **held** while this defect was live — its score
+  generator draws from a 1-5 scale, a 0-1 scale and bounded uniforms, every one of
+  them finite, so no case it produced could reach the gate with a non-finite
+  score. The property was sound and its input domain stopped short of the defect,
+  which is the more useful half of the finding. Non-finite scores now sit in that
+  file's refusal table instead, where a refused input belongs.
+- **A one-sided confidence at or below 0.5 is refused instead of inverting the
+  gate.** `z = ppf(c)` is negative below 0.5, so `wilson_lower_bound` returned a
+  "lower bound" *above* the observed rate that got **worse** as the sample grew:
+  `wilson_lower_bound(89, 100, 0.0001)` is 0.9615 and the same rate over 1000 runs
+  gives 0.9216. At exactly 0.5 the z is zero and the bound *is* `successes / n`,
+  so `assert_pass_rate((20, 20), 1.0, confidence=0.5)` passed — twenty runs
+  proving perfection, which is the claim the module's opening paragraph exists to
+  refuse. Every one of those numbers was arithmetically correct at the level asked
+  for, which is why this is a narrowed domain and not a corrected formula: a gate
+  written `confidence=0.3` reads in a test file as an act of caution and was
+  looser than comparing the raw rate. Two-sided `wilson_interval` is immune (its z
+  is `ppf((1 + c) / 2)`, never negative) and keeps the full open interval.
+- **`_runs_needed` reported a number that was not the one it promised.** Its
+  docstring claimed the smallest n at which the observed rate clears the bar, and
+  justified a binary search with "the bound is monotone in n for fixed p". That is
+  false: `successes = round(p * n)` makes the predicate *oscillate*. At `p=0.95,
+  min_rate=0.90, confidence=0.95` it holds at n = 86-90, fails at 91-99, holds at
+  100-109, fails at 110-112 and holds from 113 on, so a binary search returns
+  whichever clearing n it happens to land on. 28 of 45 grid cases disagreed with a
+  brute-force scan. What is reported now is the point past which the answer stops
+  depending on where the rounding lands — 113 in that case — found by binary
+  search on a genuinely monotone predicate (the bound at the least favourable
+  rounding, `floor(p*n - 0.5)`) followed by a short walk down to the last n that
+  still failed. It is **not** the smallest n that clears, and deliberately so: 86
+  clears only because `round(0.95 * 86) = 82` rounds the rate up to 0.9535, and a
+  reader told "86 runs" who runs 91 for luck fails.
+
+  1,399 lines of property tests sat on this function and asserted only that the
+  answer was *sufficient* — that the bound really does clear at the number
+  returned — which 113 satisfies exactly as well as 86 does. The obvious repair,
+  "and `runs_needed - 1` must not clear", turns out to catch **0 of 45** grid
+  cases, because a binary search converges to a point where `low` clears and
+  `low - 1` fails whatever the predicate does in between; it is asserted now
+  because it is true, not because it is load-bearing. The assertion that bites is
+  the other one: every n *above* the answer must clear too. That is what the
+  oscillation breaks, and it is now checked over a window in the property suite
+  and against a full brute-force scan over a 45-point grid in the example suite.
+- **The runs-needed cap was 8,388,608, not the documented 10,000,000.** The search
+  approached the cap by doubling from 1 under `while high <= cap`, so 16,777,216
+  overshot and fell to the `else`: every answer in the 8.4M-10M band came back as
+  `None`, meaning "no sample size can do this", for margins where a finite in-cap
+  answer exists. `_runs_needed(0.9001645, 0.9, 0.95)` returned `None` against a
+  true answer of 9,004,248. The cap is now searched directly.
+- **Two refusals named the offending type and not the value**, unlike every other
+  refusal in the module: `min_mean must be a number or None, got str` and `scores
+  must be a sequence of numbers, got str`. Both now quote the value, which is what
+  a caller whose threshold arrived from a config file needs to see.
+- **A `(numpy.int64, numpy.int64)` count pair was misdiagnosed as outcomes.**
+  `_looks_like_counts` tested `isinstance(item, int)`, which numpy integers fail,
+  so `assert_pass_rate((np.int64(3), np.int64(5)), 0.5)` was refused with
+  `result[0] must be a bool (or 0/1), got int64` — pointing the reader at their
+  data when the answer was their dtype. `_as_count` had accepted numpy integers
+  all along, for the stated reason that they arrive routinely from array code.
+- **The `_wilson` docstring's worked example was wrong.** It said 20/20 gives
+  "roughly `[0.86, 1.0]`". The two-sided 95% interval is `[0.8389, 1.0]` and the
+  one-sided 95% lower bound is `0.8808`; 0.86 is neither. A worked example in a
+  statistics library is a claim, and this one is now asserted against an oracle in
+  the test suite rather than trusted.
+
+### Changed
+
+- **The underpowered pass-rate message no longer reads as a power calculation,
+  because it never was one.** It said "At this observed rate roughly N runs would
+  clear the bar", which is true only if the next N runs reproduce the observed
+  rate exactly — and they land above or below it at random. The exact binomial
+  probability that a fresh sample of the recommended size clears the gate is
+  **0.66** at the 113 recommended above, 0.54 at 613 and 0.59 at 42: a coin flip
+  presented as a budget, and the same defect class a sibling project found by
+  simulation when it certified n=25 adequate at a real power of 33.9%. The message
+  now states the recommendation, says in terms that it is arithmetic on one rate
+  rather than a power calculation, and quotes the power alongside it.
+
+### Added
+
+- **A genuinely powered recommendation beside the arithmetic one.** The report
+  dict gains `power_at_runs_needed`, `target_power` (0.80) and
+  `runs_for_target_power`, and the failure message offers the last of these as
+  "the number to plan against" — 188 rather than 113 in the case above, 1.5-2.2x
+  larger across the grid. It is derived, not asserted: the power is the exact
+  binomial probability that `Binomial(n, observed)` reaches the smallest count
+  clearing the Wilson bound, computed in the standard library from a log-gamma
+  seed and a multiplicative recurrence over a 14-sigma window, and the tests
+  recompute every reported figure in exact `Fraction` arithmetic over the whole
+  tail. The recommendation is the point past which the power *stays* at or above
+  the target, for the same lattice reason `_runs_needed` reports a stable point:
+  164 is the first n to reach 80% and 165-187 fall back below it.
 
 ## [0.1.1] - 2026-08-13
 
