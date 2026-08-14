@@ -114,8 +114,18 @@ the output is pasted verbatim. Nothing here is illustrative.
 pip install opik-rigor
 ```
 
-Save a rubric as `rubric.md` (the one in [`rubrics/example-rubric.md`](rubrics/example-rubric.md)
-works), then:
+A worked example rubric ships **inside the package**, so the install gives you
+something to point the judge at:
+
+```bash
+python -c "import opik_rigor, shutil; shutil.copy(opik_rigor.example_rubric_path(), 'rubric.md')"
+```
+
+Read it, then edit it into your own — a rubric is the measuring instrument, and
+one copied from a library measures the library's idea of quality rather than
+yours. It deliberately says nothing about JSON: `PinnedJudge` appends the
+response-format instruction to the prompt itself, so a rubric that restates it
+sends the same block twice. Then:
 
 ```python
 from opik_rigor import EvidenceLog, FakeAdapter, PinnedJudge, assert_pass_rate, sample

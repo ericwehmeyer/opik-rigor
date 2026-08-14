@@ -35,7 +35,7 @@ from opik_rigor.evidence import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SHIPPED_RUBRIC = REPO_ROOT / "rubrics" / "example-rubric.md"
+SHIPPED_RUBRIC = opik_rigor.example_rubric_path()
 
 PASS_RESPONSE = '{"pass": true, "score": 5, "reason": "faithful and complete"}'
 FAIL_RESPONSE = '{"pass": false, "score": 2, "reason": "omits the stated caveat"}'
@@ -264,3 +264,36 @@ def test_every_public_name_is_importable_from_the_package_root() -> None:
     missing = [name for name in opik_rigor.__all__ if not hasattr(opik_rigor, name)]
     assert missing == []
     assert opik_rigor.__version__ == importlib.metadata.version("opik-rigor")
+
+
+def test_the_names_a_judging_consumer_needs_are_public_at_the_package_root() -> None:
+    # Roadmap item 10. A consumer that imputes a score for an ungradeable response
+    # has to know where the bottom of the scale is, and one that hashes a judge
+    # config has to hash the rubric the way rigor does or the two disagree about
+    # whether the instrument changed. Both needs are unavoidable, so both names
+    # are public rather than scavenged out of opik_rigor.judge -- which is what
+    # the first external consumer was doing, in violation of its own invariant.
+    for name in ("SCORE_MIN", "SCORE_MAX", "hash_rubric_file", "hash_rubric_text"):
+        assert name in opik_rigor.__all__, name
+        assert getattr(opik_rigor, name) is getattr(opik_rigor.judge, name), name
+
+
+def test_the_package_ships_a_pep561_marker_so_its_annotations_reach_a_consumer() -> None:
+    # Roadmap item 11. The library is annotated throughout, and under PEP 561 a
+    # type checker must ignore every one of those annotations in an installed
+    # package that carries no py.typed. One empty file is the whole fix; the risk
+    # is that it exists in the tree and is dropped by the wheel build, which is
+    # why the build job is where this is checked a second time.
+    marker = Path(opik_rigor.__file__).resolve().parent / "py.typed"
+
+    assert marker.is_file()
+
+
+def test_the_example_rubric_is_importable_rather_than_repository_only() -> None:
+    # Roadmap item 15: `pip install opik-rigor` gave you a PinnedJudge and nothing
+    # to point it at. Asserted here as well as in test_judge.py because it is a
+    # packaging property, not a judge property.
+    rubric = opik_rigor.example_rubric_path()
+
+    assert rubric.is_file()
+    assert rubric.parent.parent == Path(opik_rigor.__file__).resolve().parent

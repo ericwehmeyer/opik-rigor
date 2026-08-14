@@ -23,6 +23,7 @@ it is a reconstruction.
 | 3 | Integrations: Opik, pytest plugin, example | **complete** — 514 passed offline / 523 with opik |
 | 4 | Ship: README, rubric, tag v0.1.0 | **complete** — tagged v0.1.0 |
 | — | Publish | **v0.1.0 published to PyPI 2026-08-13** — `pip install opik-rigor` |
+| 5 | Phase 3: close the consumer-reported API gaps, additively | **complete** — items 10–15 and item 8's message closed; 534 passed offline / 543 with opik |
 
 ## Session 1 — module status
 
@@ -34,7 +35,7 @@ it is a reconstruction.
 | `src/opik_rigor/adapters/base.py` | done — Protocol, env constants, credential guards | via adapter tests |
 | `src/opik_rigor/adapters/{fake,anthropic,openai_compat}.py` | done | `tests/test_adapters.py` — 66 (+1 network-skipped) |
 | `src/opik_rigor/judge.py` | done | `tests/test_judge.py` — 46 |
-| `rubrics/example-rubric.md` | done | asserted to end with `OUTPUT_FORMAT_INSTRUCTION` |
+| `src/opik_rigor/rubrics/example-rubric.md` | done — moved inside the package in Phase 3 | asserted to state the output format exactly **once** in the rendered prompt |
 | `src/opik_rigor/__init__.py` | done — re-exports the public surface | `tests/test_integration_session1.py` — 13 |
 
 ## Session 2 — module status
@@ -178,28 +179,83 @@ here rather than worked around in the caller, per the dependency-direction rule.
     it: if a future release renames `hash_rubric_file`, the consumer's pinned CI
     stays green and its users discover the break on upgrade. Nothing in either
     repo would catch that except the drift canary.
+    **Closed (Phase 3, additively).** All four — `SCORE_MIN`, `SCORE_MAX`,
+    `hash_rubric_file` and `hash_rubric_text` — are re-exported from
+    `opik_rigor/__init__.py` and are in `__all__`, with the reasoning in the module
+    docstring so a later reader does not delete them as clutter.
+    `tests/test_integration_session1.py::test_the_names_a_judging_consumer_needs_are_public_at_the_package_root`
+    asserts each is in `__all__` **and** is the same object as
+    `opik_rigor.judge.<name>`, so the two spellings cannot drift apart. The
+    submodule path still works, so migration-kit's existing imports are untouched;
+    it can move to the package root at its leisure.
 11. **No `py.typed`, so none of the annotations reach a consumer.** The library is
     thoroughly annotated and ships no marker file, which under PEP 561 means a
     type checker ignores every one of them. This is arguably a larger typing gap
     than item 4, which only concerns the untyped report dicts — and it is one
     empty file to fix.
+    **Closed (Phase 3).** `src/opik_rigor/py.typed` exists and, more to the point,
+    is *in the wheel* — `opik_rigor/py.typed` appears in
+    `zipfile.ZipFile(wheel).namelist()`, and a clean-venv install of that wheel
+    reports `(Path(opik_rigor.__file__).parent / "py.typed").exists() == True`.
+    No packaging change was needed: hatchling's `packages = ["src/opik_rigor"]`
+    already ships every non-Python file under the package. That was checked by
+    building rather than assumed, because "the marker exists in the tree" and "the
+    marker reaches a consumer" are different claims and only the second one is the
+    bug.
 12. **`SampleResult.exceptions` returns `Run` objects, not exceptions.** The
     obvious line `[str(e) for e in result.exceptions]` yields run reprs, silently.
     `errored_runs` would name the thing it returns.
+    **Closed (Phase 3, additively).** `SampleResult.errored_runs` is the named
+    accessor; `.exceptions` returns the same tuple and is documented as deprecated.
+    **No `DeprecationWarning` is emitted**, deliberately: `.exceptions` is read
+    inside loops and inside every consumer assertion, so a warning there produces a
+    wall of test output rather than a migration, and the two names are the same
+    object so nothing is at risk while a caller moves. A test pins the silence
+    (`warnings.simplefilter("error")` around a read of `.exceptions`), because
+    "we chose not to warn" is only a decision if it is enforced.
 13. **`hash_rubric_text(data: bytes)` takes bytes despite the name**, and passing a
     `str` fails inside the library on its own `b"\r\n"` literal with
     `TypeError: replace() argument 1 must be str, not bytes` — a message that
     describes the inverse of the caller's actual mistake.
+    **Closed (Phase 3, additively).** The parameter is now `bytes | str`; a `str`
+    is encoded UTF-8 and hashes identically, so
+    `hash_rubric_text(path.read_text(encoding="utf-8")) == hash_rubric_file(path)`
+    for LF and CRLF files. Anything that is neither text nor bytes-like is refused
+    at the boundary with a message naming the type it got and pointing at
+    `hash_rubric_file` for the argument callers actually reach for. The tests
+    check against the **published FIPS 180-4 SHA-256 vectors** for `"abc"` and the
+    empty input rather than against a second call to `hashlib`, so they would catch
+    the normalisation silently changing.
 14. **`assert_no_regression` on text reports "current has no scores"** — "you have
     no data" when the truth is "your data is the wrong shape". Same confusion as
     item 8, and a caller who is holding 200 completions will not read that message
     as being about types.
+    **Closed (Phase 3).** The opening sentence is unchanged, so anything matching
+    on it still matches; what follows now names the type (`SampleResult`), the run
+    count, and the first offending value (`run 0 returned str 'Paris'`) — or, when
+    every run raised, the first error, because "wrong shape" and "the provider was
+    down" call for opposite responses. A genuinely empty input still gets the plain
+    sentence and nothing more; the diagnosis appears only when there is a diagnosis
+    to give. What the gate accepts is unchanged.
 15. **The wheel ships no rubric.** `rubrics/example-rubric.md` is repo-only, so
     `pip install opik-rigor` gives you a `PinnedJudge` and nothing to point it at,
     while `README.md` line 117 points at the unpackaged file. Related, and
     verified: that example ends with `OUTPUT_FORMAT_INSTRUCTION` while
     `PROMPT_TEMPLATE` already appends it, so a rubric copied from it carries the
     format block twice.
+    **Closed (Phase 3).** The rubric moved to
+    `src/opik_rigor/rubrics/example-rubric.md` — inside the package, so it is in
+    the wheel (verified by listing `namelist()` and by copying it out of a
+    clean-venv install) — and `opik_rigor.example_rubric_path()` returns its path.
+    The README now tells you to copy it out of the install rather than linking a
+    repository file, and the example and three test modules read it through the
+    same public function, so nothing in this repo points at a path an installed
+    user does not have. The double-format bug is fixed in the shipped file: the
+    "Output format" section now says why it is empty. The old assertion (rubric
+    *ends with* `OUTPUT_FORMAT_INSTRUCTION`) was inverted rather than deleted —
+    `test_the_shipped_rubric_states_the_output_format_exactly_once` asserts the
+    instruction is absent from the file and appears exactly once in the rendered
+    prompt, which is the invariant the original test was reaching for.
 
 Item 8 has a sharper form than the one recorded above, found by the same audit and
 worth stating because it changes how the bug presents: `SampleResult.completed`
@@ -207,6 +263,65 @@ filters on `run.raised`, so when the default classifier raises, `.values` and
 `.outcomes` come back **empty**. The caller does not merely see an extra error —
 the accessor that means "give me the text back" returns nothing at all, and
 `pass_rate=0.0` beside `failures=0` reads as "the system never responded."
+
+**Partly closed in Phase 3, and the rest deliberately left.** Judged against the
+sharper form, the old message did *not* already say what to do: it named the type
+and offered `outcome=`, but said nothing about the run being dropped, so a caller
+staring at `pass_rate=0.0`, `failures=0` and empty `.values` had no route from
+what they were looking at to the sentence that explains it. `default_outcome` now
+names the offending value (clipped, so a 4kB completion cannot become the
+traceback), states that the run is dropped from `.values`, `.outcomes`,
+`.successes` and `.completed`, spells out that this reads as `pass_rate=0.0`
+beside `failures=0`, and gives the one-liner for the "I only want the values back"
+case (`outcome=lambda value: True`).
+
+The **behaviour** is unchanged and is now pinned by a test that asserts the bad
+reading — `pass_rate == 0.0`, `failures == 0`, `values == ()` — precisely so that
+fixing it later is a visible, deliberate act. It is a major-version change, not an
+additive one: every candidate fix (a fourth outcome state, a separate field for
+classifier errors, `outcome=None` meaning "do not classify") changes what a
+recorded sample *means*, and therefore what `pass_rate` and `n` are, and therefore
+the verdict a consumer reads off `PassRateError.stats`. migration-kit's
+`COMPATIBILITY.md` §2.1–2.3 sits directly on those. It waits for 0.2.
+
+Item 9 (no token usage on the `Adapter` seam) is likewise still open, for the same
+reason: adding `complete_with_usage` to the protocol is additive for adapters but
+not for code that type-checks against `Adapter`.
+
+## Phase 3 — closing the recorded gaps
+
+Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
+Items 8 (behaviour) and 9 are deliberately left; the reasoning is under each.
+Nothing was renamed, no signature rejects a call that used to work, and no gate's
+verdict moved, because 0.1.0 is on PyPI with a consumer pinned to
+`>=0.1.0,<0.2`.
+
+**Backwards compatibility was checked mechanically, against the built wheel rather
+than against this working copy.** A script transcribes the 0.1.0 `__all__`, the
+thirteen signatures, and the attribute-level dependencies out of
+`migration-kit/COMPATIBILITY.md` §1 — a record written from *outside*, by
+introspecting the published artifact — then asserts every one of them still holds
+in a clean venv holding only the new wheel. It also re-checks the numbers that
+decide a verdict: `assert_pass_rate`'s success-dict key set, `underpowered` and
+`runs_needed` on the failure path, `lower_bound == 0.8596681784340271` for 38/40,
+and the 16-key regression report. It reports no problems.
+
+**Test counts, and why the headline number depends on the command.**
+
+| command | result |
+|---|---|
+| `.venv\Scripts\python.exe -m pytest` | 515 passed, 11 skipped (was 495 / 11) |
+| `.venv\Scripts\python.exe -m pytest tests examples` | 534 passed, 11 skipped (was 514 / 11) |
+| `.venv-opik\Scripts\python.exe -m pytest tests examples` | 543 passed, 2 skipped (was 523 / 2) |
+
+Twenty tests added, no test deleted. The "523 tests" figure this project quotes is
+the **third** row: `pyproject.toml` sets `testpaths = ["tests"]`, so a bare
+`pytest` does not collect `examples/test_example_runs.py` at all and reports 19
+fewer. That is worth knowing before someone reads a bare `pytest` run as a
+regression against a number that was never measured that way. One test was
+rewritten rather than added — `test_shipped_rubric_ends_with_the_output_format_the_judge_parses`
+became `test_the_shipped_rubric_states_the_output_format_exactly_once`, asserting
+the inverse, because the thing it pinned turned out to be the bug.
 
 ## Decisions made, and why
 
@@ -272,6 +387,9 @@ python -m venv .venv
 
 Local venv is Python 3.14.4 with scipy 1.18.0 and pytest 9.1.1. CI runs Ubuntu and
 Windows across Python 3.10–3.13.
+
+Note that `pytest` alone honours `testpaths = ["tests"]` and therefore skips
+`examples/`. Run `pytest tests examples` to get the number this file quotes.
 
 ## Invariants that must survive every later session
 

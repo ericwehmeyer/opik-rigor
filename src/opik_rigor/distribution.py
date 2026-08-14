@@ -34,7 +34,7 @@ from scipy.stats import mannwhitneyu, norm
 
 from .errors import StatisticalAssertionError
 from .evidence import EVENT_ASSERTION, EvidenceLog
-from .sampling import SampleResult
+from .sampling import SampleResult, _short_repr
 
 #: Default confidence for the Wilson bound. 0.95 one-sided, which is the honest
 #: default for a gate: you care only about the floor, not about how high the rate
@@ -404,6 +404,57 @@ def _coerce_scores(data: Any, argument: str) -> tuple[float, ...]:
     return tuple(scores)
 
 
+def _no_scores_detail(data: Any) -> str:
+    """Why ``data`` yielded no scores, in terms of the object the caller passed.
+
+    "current has no scores" reads as *you have no data*, and the caller who sees
+    it is usually holding several hundred completions. What actually happened is
+    that :meth:`~opik_rigor.sampling.SampleResult.scores` harvests
+    ``getattr(run.value, "score", None)``, so a sample of plain strings -- the
+    most common thing an adapter returns -- harvests nothing. The shape is wrong,
+    not the quantity, and the message has to say which.
+
+    Returns a sentence to append, or ``""`` when the input really is empty and the
+    plain message is already the truth.
+    """
+    runs = getattr(data, "runs", None)
+    if not isinstance(runs, (tuple, list)) or not runs:
+        return ""
+
+    errored = [run for run in runs if getattr(run, "error", None) is not None]
+    if len(errored) == len(runs):
+        first = getattr(errored[0], "error", None)
+        return (
+            f" It is a {type(data).__name__} of {len(runs)} runs and every one of them "
+            f"raised, so there was nothing to harvest a score from; the first error is "
+            f"{type(first).__name__}: {first}"
+        )
+
+    def unscored(run: Any) -> bool:
+        score = getattr(getattr(run, "value", None), "score", None)
+        return isinstance(score, bool) or not isinstance(score, (int, float))
+
+    completed = [run for run in runs if getattr(run, "error", None) is None]
+    offender = next((run for run in completed if unscored(run)), None)
+    detail = (
+        f" It is a {type(data).__name__} of {len(runs)} runs, {len(completed)} of which "
+        f"completed, but none of them carried a numeric .score"
+    )
+    if offender is not None:
+        # getattr rather than attribute access: this runs while building an error
+        # message, and a duck-typed run object that raised here would replace the
+        # caller's real problem with an AttributeError from inside a statistics call.
+        value = getattr(offender, "value", None)
+        detail += (
+            f": run {getattr(offender, 'index', '?')} returned "
+            f"{type(value).__name__} {_short_repr(value)}"
+        )
+    return (
+        f"{detail}. This gate compares judge scores, so pass the verdicts -- or a "
+        f"sequence of numbers -- rather than the raw completions."
+    )
+
+
 def _record(evidence: EvidenceLog | None, report: dict[str, Any]) -> None:
     """Append exactly one assertion record, on the way past -- pass or fail."""
     if evidence is not None:
@@ -715,9 +766,15 @@ def assert_no_regression(
     baseline_scores = _coerce_scores(baseline, "baseline")
     level = _validate_unit(alpha, "alpha", exclusive=True)
     if not current_scores:
-        raise ValueError("current has no scores; there is nothing to compare against baseline")
+        raise ValueError(
+            "current has no scores; there is nothing to compare against baseline."
+            + _no_scores_detail(current)
+        )
     if not baseline_scores:
-        raise ValueError("baseline has no scores; a missing baseline is not a passing comparison")
+        raise ValueError(
+            "baseline has no scores; a missing baseline is not a passing comparison."
+            + _no_scores_detail(baseline)
+        )
 
     result = mannwhitneyu(current_scores, baseline_scores, alternative="less")
     u_statistic = float(result.statistic)

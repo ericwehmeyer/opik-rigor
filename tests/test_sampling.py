@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import random
 import threading
+import warnings
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -159,6 +160,33 @@ def test_successes_failures_exceptions_and_pass_rate_are_counted_independently()
     assert [run.index for run in result.exceptions] == [8, 9]
     assert result.outcomes == (True,) * 5 + (False,) * 3
     assert len(result.completed) == 8
+
+
+def test_errored_runs_is_the_correctly_named_accessor_and_exceptions_still_works() -> None:
+    # Roadmap item 12. `.exceptions` returns Run objects, so the obvious line
+    # `[str(e) for e in result.exceptions]` yields run reprs and nobody notices.
+    # `errored_runs` says what it hands back; `.exceptions` is kept as an exact
+    # alias because 0.1.0 is on PyPI and a consumer is pinned to it.
+    items = [True] * 5 + [False] * 3 + [Boom("a"), Boom("b")]
+
+    result = sample(Script(items), 10)
+
+    assert result.errored_runs == result.exceptions
+    assert [run.index for run in result.errored_runs] == [8, 9]
+    assert [type(run.error).__name__ for run in result.errored_runs] == ["Boom", "Boom"]
+    # The line the name is supposed to make obvious.
+    assert [str(run.error) for run in result.errored_runs] == ["a", "b"]
+
+
+def test_the_deprecated_alias_stays_silent_rather_than_warning_in_a_consumers_suite() -> None:
+    # A DeprecationWarning here would fire once per assertion in every downstream
+    # test that reads `.exceptions`, which buys a wall of output rather than a
+    # migration. The docstring carries the deprecation; the runtime does not.
+    result = sample(Script([Boom("a")]), 1)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert len(result.exceptions) == 1
 
 
 def test_failures_exclude_exceptions_under_both_error_accounting_settings() -> None:
@@ -443,6 +471,45 @@ def test_value_the_default_outcome_cannot_read_is_recorded_as_an_exception_run()
     (undecidable,) = result.exceptions
     assert isinstance(undecidable.error, TypeError)
     assert undecidable.value == "looks good to me"
+
+
+def test_the_refusal_names_the_value_and_where_the_run_went() -> None:
+    # Roadmap item 8's sharper form. The classifier's refusal is correct, but it
+    # is filed on Run.error, which .completed filters out -- so a sample of plain
+    # strings reports pass_rate 0.0 beside failures 0 and empty .values, which
+    # reads as a total outage. The message is the only thing standing between a
+    # caller and that reading, so it has to carry the diagnosis and the fix.
+    with pytest.raises(TypeError) as excinfo:
+        default_outcome("Paris")
+
+    message = str(excinfo.value)
+
+    assert "'Paris'" in message  # which value, not just which type
+    assert ".values" in message and "pass_rate=0.0" in message  # where the run went
+    assert "outcome=" in message  # and what to do instead
+
+
+def test_the_refusal_does_not_paste_a_whole_completion_into_the_message() -> None:
+    # The value is model output and can be arbitrarily long; a traceback carrying
+    # 4kB of prose is not a better error message.
+    with pytest.raises(TypeError) as excinfo:
+        default_outcome("x" * 5000)
+
+    assert len(str(excinfo.value)) < 700
+
+
+def test_a_sample_of_unclassifiable_values_reads_as_an_outage_it_is_not() -> None:
+    # Pinned deliberately: this is the behaviour the message above compensates
+    # for, and changing it is a major version, not a patch. If this test starts
+    # failing because the numbers got better, that is the fix landing -- update
+    # the message and PROGRESS.md item 8 with it.
+    result = sample(Script(["Paris", "Paris", "Paris"]), 3)
+
+    assert result.pass_rate == 0.0
+    assert result.failures == 0
+    assert result.values == ()
+    assert result.outcomes == ()
+    assert len(result.errored_runs) == 3
 
 
 # --------------------------------------------------------------------------- #

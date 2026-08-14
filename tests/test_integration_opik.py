@@ -55,6 +55,7 @@ from opik_rigor import (
     PinnedJudge,
     SampleResult,
     assert_pass_rate,
+    example_rubric_path,
     sample,
 )
 from opik_rigor.integrations.opik import (
@@ -64,8 +65,7 @@ from opik_rigor.integrations.opik import (
     log_sample_to_opik,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-RUBRIC = REPO_ROOT / "rubrics" / "example-rubric.md"
+RUBRIC = example_rubric_path()
 
 #: Fixed so a failure here is reproducible by re-running, not by re-rolling.
 SHUFFLE_SEED = 20260813

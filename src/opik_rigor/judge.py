@@ -45,15 +45,21 @@ from .pinning import require_pinned
 SCORE_MIN = 1.0
 SCORE_MAX = 5.0
 
+#: Filename of the example rubric shipped inside the package. Resolved by
+#: :func:`example_rubric_path`; named here so a caller can find it in a wheel
+#: listing without running Python.
+EXAMPLE_RUBRIC_NAME = "example-rubric.md"
+
 #: Accepted spellings of the boolean verdict field. ``pass`` is what the prompt
 #: asks for; ``passed`` is the variant models emit anyway. Accepting a known
 #: spelling of the *same declared field* is not the same as inferring a verdict
 #: from prose -- the value still has to be a JSON boolean.
 PASS_KEYS = ("pass", "passed")
 
-#: The last thing the judge model reads. ``rubrics/example-rubric.md`` ends with
-#: this same text verbatim so that a rubric file is readable on its own, and so
-#: that editing the expected format in one place is visibly a change to both.
+#: The last thing the judge model reads. :func:`example_rubric_path` deliberately
+#: does *not* restate it: ``PROMPT_TEMPLATE`` already appends it, so a rubric that
+#: carries a copy puts the same block in the rendered prompt twice. A rubric is
+#: about criteria; the response format is the library's business.
 OUTPUT_FORMAT_INSTRUCTION = (
     "Answer with a single JSON object and nothing else, in exactly this form:\n"
     "\n"
@@ -110,7 +116,7 @@ class Verdict:
     reason: str | None = None
 
 
-def hash_rubric_text(data: bytes) -> str:
+def hash_rubric_text(data: bytes | str) -> str:
     """sha256 of ``data`` with CRLF line endings normalised to LF.
 
     Without this the same rubric file hashes differently on a Windows checkout
@@ -119,7 +125,28 @@ def hash_rubric_text(data: bytes) -> str:
     file nobody touched. Normalising the *bytes we hash* -- not the file -- keeps
     the identity of a rubric tied to its content rather than to git's autocrlf
     setting, while leaving the file on disk exactly as checked out.
+
+    A ``str`` is encoded as UTF-8 and hashed identically, because the name says
+    "text" and refusing the type the name advertises is a trap. It used to be one:
+    passing a ``str`` failed several lines in on this function's own ``b"\\r\\n"``
+    literal with ``TypeError: replace() argument 1 must be str, not bytes`` -- a
+    message describing the exact inverse of the caller's mistake. Anything that is
+    neither ``str`` nor bytes-like is now refused here, by name, rather than
+    somewhere further in.
+
+    ``hash_rubric_text(path.read_text(encoding="utf-8"))`` therefore agrees with
+    :func:`hash_rubric_file` for any UTF-8 rubric using LF or CRLF endings. It does
+    *not* agree for a file with bare-CR (classic Mac) endings: ``read_text``
+    translates those to LF and the byte-level normalisation here does not.
     """
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    elif not isinstance(data, (bytes, bytearray)):
+        raise TypeError(
+            f"hash_rubric_text() wants the rubric's text or bytes, got "
+            f"{type(data).__name__}; pass a str, pass bytes, or use "
+            f"hash_rubric_file(path) if what you have is a path"
+        )
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
@@ -131,6 +158,34 @@ def hash_rubric_file(path: str | os.PathLike[str]) -> str:
     earn a opik_rigor-specific exception type.
     """
     return hash_rubric_text(Path(path).read_bytes())
+
+
+def example_rubric_path() -> Path:
+    """Path to the worked example rubric, as installed.
+
+    ``pip install opik-rigor`` used to give you a :class:`PinnedJudge` and nothing
+    to point it at: the example rubric lived in the repository and was not
+    packaged. It now ships inside the package, so this returns a real path on any
+    install and ``PinnedJudge(adapter, example_rubric_path(), log)`` works out of
+    the box.
+
+    Read it, then write your own -- a rubric is the measuring instrument, and one
+    copied from a library is measuring the library's idea of quality rather than
+    yours. Note that it deliberately says nothing about JSON: the response format
+    is appended by :data:`PROMPT_TEMPLATE`, and a rubric that restates it sends the
+    same block twice.
+
+    ``Path`` rather than an ``importlib.resources`` traversable because the caller
+    hands it straight to :class:`PinnedJudge`, which reads a filesystem path. That
+    assumes the package is installed unzipped, which is what a wheel install does.
+    """
+    path = Path(__file__).resolve().parent / "rubrics" / EXAMPLE_RUBRIC_NAME
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"the packaged example rubric is missing from {path.parent}; this is a "
+            f"packaging fault in opik-rigor, not something you did"
+        )
+    return path
 
 
 class PinnedJudge:

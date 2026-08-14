@@ -59,12 +59,15 @@ from opik_rigor import (
     assert_no_regression,
     assert_pass_rate,
     assert_score_distribution,
+    example_rubric_path,
     sample,
 )
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent
-RUBRIC = REPO_ROOT / "rubrics" / "example-rubric.md"
+#: The rubric ships inside the package, so this example points at the same file a
+#: reader gets from `pip install opik-rigor` rather than at a repository path they
+#: would not have.
+RUBRIC = example_rubric_path()
 
 WIDTH = 96
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+import opik_rigor
 from opik_rigor.errors import JudgeOutputError, ModelPinError, RubricDriftError
 from opik_rigor.evidence import (
     EVENT_JUDGE_INIT,
@@ -32,6 +33,9 @@ from opik_rigor.judge import (
     SCORE_MIN,
     PinnedJudge,
     Verdict,
+    example_rubric_path,
+    hash_rubric_file,
+    hash_rubric_text,
 )
 
 PINNED_MODEL = "claude-sonnet-4-5-20250929"
@@ -160,18 +164,102 @@ def test_crlf_and_lf_rubrics_hash_identically(tmp_path: Path) -> None:
     assert crlf_judge.rubric_hash == lf_judge.rubric_hash
 
 
-def test_shipped_rubric_ends_with_the_output_format_the_judge_parses(tmp_path: Path) -> None:
-    # The rubric is the prompt's tail. If the two drift apart, the judge asks for
-    # one format and the rubric documents another, and parsing fails in the field.
-    shipped = Path(__file__).resolve().parents[1] / "rubrics" / "example-rubric.md"
+def test_the_shipped_rubric_states_the_output_format_exactly_once(tmp_path: Path) -> None:
+    # It used to state it twice. The rubric ended with OUTPUT_FORMAT_INSTRUCTION
+    # verbatim -- deliberately, so the file read as a whole prompt on its own --
+    # while PROMPT_TEMPLATE appends the same block, so anyone copying the example
+    # as a starting point shipped the format instructions to the model twice. The
+    # instruction belongs to the library and the criteria belong to the rubric,
+    # and the seam is what this test pins.
+    shipped = example_rubric_path()
     text = shipped.read_text(encoding="utf-8")
 
-    assert text.rstrip("\n").endswith(OUTPUT_FORMAT_INSTRUCTION)
+    assert OUTPUT_FORMAT_INSTRUCTION not in text
 
     judge, adapter, _ = make_judge(tmp_path, rubric=shipped, responses=[PASS_JSON])
     judge.evaluate("Summarise the memo.", "The memo says X.")
 
-    assert OUTPUT_FORMAT_INSTRUCTION in adapter.prompts[0]
+    assert adapter.prompts[0].count(OUTPUT_FORMAT_INSTRUCTION) == 1
+
+
+# --------------------------------------------------------------------------- #
+# hash_rubric_text accepts the text its name promises
+# --------------------------------------------------------------------------- #
+
+#: Published SHA-256 test vectors, from FIPS 180-4's own worked examples. Used
+#: rather than recomputing with hashlib here, so the assertion is against the
+#: standard rather than against a second call to the same library.
+SHA256_OF_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+SHA256_OF_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+@pytest.mark.parametrize("data", [b"abc", "abc"])
+def test_hash_rubric_text_hashes_bytes_and_str_to_the_published_sha256(data: bytes | str) -> None:
+    # The name says "text", so a str has to work; it used to fail four lines in on
+    # this function's own b"\r\n" literal with a message about the inverse mistake.
+    assert hash_rubric_text(data) == SHA256_OF_ABC
+
+
+@pytest.mark.parametrize("data", [b"", ""])
+def test_hash_rubric_text_hashes_nothing_to_the_published_empty_sha256(data: bytes | str) -> None:
+    assert hash_rubric_text(data) == SHA256_OF_EMPTY
+
+
+def test_hash_rubric_text_normalises_crlf_in_a_str_exactly_as_it_does_in_bytes() -> None:
+    # The whole reason the function exists, now on the str path too.
+    assert hash_rubric_text(RUBRIC_CRLF) == hash_rubric_text(RUBRIC_LF)
+    assert hash_rubric_text(RUBRIC_CRLF) == hash_rubric_text(RUBRIC_LF.encode("utf-8"))
+
+
+def test_hashing_a_rubric_file_agrees_with_hashing_the_text_read_out_of_it(
+    tmp_path: Path,
+) -> None:
+    # The property a consumer needs: hashing what you read and hashing the path
+    # cannot disagree, or two projects computing "the same" hash silently differ.
+    rubric = write_rubric(tmp_path, RUBRIC_CRLF)
+
+    assert hash_rubric_file(rubric) == hash_rubric_text(rubric.read_bytes())
+    assert hash_rubric_file(rubric) == hash_rubric_text(rubric.read_text(encoding="utf-8"))
+
+
+def test_hash_rubric_text_names_what_it_was_given_rather_than_failing_inside() -> None:
+    # A Path is the plausible wrong argument -- the one a caller reaches for when
+    # they meant hash_rubric_file -- so the message has to point at that.
+    with pytest.raises(TypeError) as excinfo:
+        hash_rubric_text(Path("rubric.md"))  # type: ignore[arg-type]
+
+    message = str(excinfo.value)
+    assert "hash_rubric_text" in message
+    assert "Path" in message
+    assert "hash_rubric_file" in message
+    assert "replace()" not in message  # the old message described the inverse mistake
+
+
+# --------------------------------------------------------------------------- #
+# the packaged example rubric
+# --------------------------------------------------------------------------- #
+
+
+def test_the_example_rubric_ships_inside_the_package() -> None:
+    # Item 15: `pip install opik-rigor` used to give you a PinnedJudge and nothing
+    # to point it at. The file has to sit under the imported package, not under a
+    # repository directory that an installed user does not have.
+    rubric = example_rubric_path()
+    package_root = Path(opik_rigor.__file__).resolve().parent
+
+    assert rubric.is_file()
+    assert package_root in rubric.parents
+    assert rubric.read_text(encoding="utf-8").strip() != ""
+
+
+def test_the_packaged_rubric_is_a_rubric_a_judge_can_actually_run(tmp_path: Path) -> None:
+    judge, adapter, _ = make_judge(tmp_path, rubric=example_rubric_path(), responses=[PASS_JSON])
+
+    verdict = judge.evaluate("Summarise the memo.", "The memo says X, with caveat Y.")
+
+    assert verdict.passed is True
+    assert judge.rubric_hash == hash_rubric_file(example_rubric_path())
+    assert "faithful" in adapter.prompts[0].lower()
 
 
 # --------------------------------------------------------------------------- #
