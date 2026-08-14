@@ -470,11 +470,52 @@ covers**. Until those coercion paths have tests that would notice, dropping NumP
 is a change whose regression nothing in this repository can catch, which is the
 one kind of change this project does not make.
 
-### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model
+### 19. `AnthropicAdapter` cannot call any current frontier Anthropic model — **RESOLVED 2026-08-14**
+
+**Resolved by the first option below, with a piece of the second.** `temperature`
+now defaults to `None`, meaning the key is *absent from the request* rather than
+set to something chosen for you, and it is omitted unconditionally — on every
+model, current or older. An explicitly-passed value is still sent to a model that
+accepts one; against a model that does not, it is refused at **construction**,
+with a message naming the model, rather than becoming a 400 partway through a run
+that has already spent calls.
+
+Omitting unconditionally is the part worth recording. A model-conditional default
+would put the vendor table on the happy path, so the day Anthropic ships a model
+the table has not heard of, the zero-argument constructor starts returning 400s
+again — the same defect, waiting on a release date. Omitting always is correct on
+every model Anthropic serves and cannot rot. The table (`_SAMPLING_REMOVED`) is
+therefore consulted *only* to reject an explicit value, which means its staleness
+costs exactly one thing: an explicit `temperature` against a model released after
+the table was written produces the vendor's 400 instead of our `ValueError` —
+which is the behaviour that shipped before the table existed. It can never break a
+call that works.
+
+What it costs: an older model that still accepts sampling parameters now gets the
+API default rather than `0.0` unless asked. On a current model that lever no
+longer exists at all, which is a fact about the provider and not a choice this
+library gets to make.
+
+Verified against the merged tree: the zero-argument constructor yields
+`temperature=None` for `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-6` and
+`claude-haiku-4-5-20251001`; `AnthropicAdapter("claude-opus-5", temperature=0.0)`
+raises `ValueError`; `AnthropicAdapter("claude-opus-4-6", temperature=0.0)` keeps
+`0.0`; the gateway spelling `anthropic.claude-opus-5` matches the table and the
+finetune name `my-claude-opus-5-tuned` does not. Tests assert the *absence* of the
+key in the built payload, not merely that a call succeeds.
+
+**With items 16 and 19 both closed, rigor can judge with a current Anthropic
+model.** Those were the two blockers and they were sequential: 16 was the front
+door locked, 19 was there being no room behind it.
+
+The original record follows, because the reasoning that chose between the options
+is the part worth keeping.
+
+---
 
 Found on 2026-08-14 by a coordinating agent reading Anthropic's own migration
 reference against `src/opik_rigor/adapters/anthropic.py`, and confirmed here by
-reading the call shape rather than by spending a credential. The adapter passes
+reading the call shape rather than by spending a credential. The adapter passed
 `temperature` on every request:
 
 ```python
@@ -541,6 +582,10 @@ one; it needs a test that asserts the key is *absent* from the request payload,
 not merely that the call succeeds. Deciding between it and the per-model table is
 the open question, and it is deliberately left open here rather than settled in a
 branch whose subject is import cost.
+
+**How it was settled:** the first option, plus the second's table used *only* on
+the explicit-value path so it can never sit between a default-constructed adapter
+and a working call. See the resolution note at the top of this item.
 
 ## Phase 3 — closing the recorded gaps
 

@@ -47,6 +47,35 @@ which is where this project puts changes that alter what a recorded sample means
 
 ### Fixed
 
+- **`AnthropicAdapter` could not call any current Anthropic model.** It sent
+  `temperature` on every request, with a constructor default of `0.0`, and
+  `temperature`/`top_p`/`top_k` were removed from the Messages API on the current
+  generation — Opus 5, Opus 4.8, Opus 4.7, Sonnet 5 and Fable 5 return a **400**
+  for any of them. There was no way to construct an adapter that avoided it:
+  the parameter had no omit-sentinel, the constructor rejected `None`, and the
+  value was passed unconditionally. A judge built the way the README builds one
+  could not complete a single call.
+
+  `temperature` now defaults to `None`, meaning the key is **absent** from the
+  request rather than set to something chosen for you, and it is omitted on every
+  model. An explicit value is still sent to a model that accepts one; against a
+  model that does not, it is refused at *construction*, naming the model, rather
+  than becoming a 400 partway through a run that has already spent calls.
+
+  Omitting unconditionally is deliberate. A model-conditional default would put
+  the vendor table on the happy path, so the day a model ships that the table has
+  not heard of, the zero-argument constructor would start returning 400s again —
+  the same defect, waiting on a release date. The table is consulted only to
+  reject an explicit value, so its going stale costs one thing: an explicit
+  `temperature` against a newer model gets the vendor's 400 instead of our
+  `ValueError`. It can never break a call that works.
+
+  Together with the pin-rule fix below, this closes the second of two blockers:
+  `is_pinned` refusing every current model id was the front door locked, and this
+  was there being no room behind it. Cost worth naming: an older model that still
+  accepts sampling parameters now gets the API default rather than `0.0` unless
+  asked, and on a current model that lever no longer exists at all.
+
 - **A score-distribution gate returned green on infinite input.** This is the
   worst thing in the release and it is the exact failure the library exists to
   prevent. `_coerce_scores` refused NaN and never checked for infinity, so
