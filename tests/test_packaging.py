@@ -1,0 +1,169 @@
+"""What the *built wheel* contains, as opposed to what the source tree contains.
+
+Every other test in this suite imports ``opik_rigor`` from an editable install,
+which resolves into ``src/``. That is exactly the wrong instrument for a
+packaging question: ``src/opik_rigor/py.typed`` existing proves nothing about
+whether ``hatchling`` copied it into the artifact a consumer installs, and a test
+that reads the source tree while claiming to check the wheel is worse than no
+test, because it reports success for the case it cannot see.
+
+So these tests build a wheel into a temporary directory and read the zip. They
+also import out of an *extracted* wheel with that directory first on ``sys.path``
+and assert the module actually loaded from there -- a check that has to be made
+explicitly, because a developer's own ``src/`` will otherwise fill in silently
+whatever the wheel omitted, and the test would pass on a wheel that ships
+nothing.
+
+If ``build`` is unavailable the tests skip with a reason naming what went
+unverified. A skip is not a pass, and the release procedure in PROGRESS.md
+re-checks these same two paths against the artifact that is actually uploaded.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+#: Paths inside the wheel that are data rather than code, and are therefore the
+#: ones a build backend can silently drop without breaking an import.
+DATA_FILES_THE_WHEEL_MUST_CARRY = (
+    "opik_rigor/py.typed",
+    "opik_rigor/rubrics/example-rubric.md",
+)
+
+#: Names 0.1.1 promises at the package root. Checked against the wheel rather
+#: than against ``opik_rigor.__all__`` so that a name which is exported but not
+#: shipped cannot pass.
+NAMES_THE_PACKAGE_ROOT_MUST_EXPORT = (
+    "SCORE_MIN",
+    "SCORE_MAX",
+    "hash_rubric_file",
+    "hash_rubric_text",
+    "example_rubric_path",
+)
+
+
+@pytest.fixture(scope="session")
+def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build a wheel from this checkout and return the path to it.
+
+    Session-scoped: a wheel build is seconds, and every test here wants the same
+    one. ``--no-isolation`` when the backend is already importable, because that
+    is offline and deterministic; otherwise the isolated build, which fetches
+    ``hatchling`` and therefore needs a network or a populated pip cache.
+    """
+    if not PYPROJECT.is_file():
+        pytest.skip(
+            f"not a source checkout ({PYPROJECT} does not exist), so the wheel "
+            f"contents of {', '.join(DATA_FILES_THE_WHEEL_MUST_CARRY)} are UNVERIFIED"
+        )
+    if importlib.util.find_spec("build") is None:
+        pytest.skip(
+            "the `build` package is not installed, so the wheel contents of "
+            f"{', '.join(DATA_FILES_THE_WHEEL_MUST_CARRY)} are UNVERIFIED -- "
+            "install the dev extra (`pip install -e '.[dev]'`) to run this check"
+        )
+
+    outdir = tmp_path_factory.mktemp("wheel")
+    command = [sys.executable, "-m", "build", "--wheel", "--outdir", str(outdir)]
+    if importlib.util.find_spec("hatchling") is not None:
+        command.append("--no-isolation")
+
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        pytest.fail(
+            f"`{' '.join(command)}` failed with exit {result.returncode}\n"
+            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+        )
+
+    wheels = sorted(outdir.glob("*.whl"))
+    assert len(wheels) == 1, f"expected exactly one wheel in {outdir}, got {wheels}"
+    return wheels[0]
+
+
+@pytest.fixture(scope="session")
+def extracted_wheel(built_wheel: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The built wheel unpacked, as an installer would lay it down on disk."""
+    target = tmp_path_factory.mktemp("unpacked")
+    with zipfile.ZipFile(built_wheel) as archive:
+        archive.extractall(target)
+    return target
+
+
+@pytest.mark.parametrize("member", DATA_FILES_THE_WHEEL_MUST_CARRY)
+def test_the_built_wheel_carries_the_data_files_the_package_promises(
+    built_wheel: Path, member: str
+) -> None:
+    # py.typed is the PEP 561 marker: without it inside the *wheel*, a type
+    # checker discards every annotation in an installed copy no matter how many
+    # of them the source tree has. The rubric is what `example_rubric_path()`
+    # returns; 0.1.0's wheel shipped neither, which is the whole reason both are
+    # named here rather than assumed.
+    with zipfile.ZipFile(built_wheel) as archive:
+        members = archive.namelist()
+
+    assert member in members, (
+        f"{member} is missing from {built_wheel.name}; it exists in the source "
+        f"tree, so this is a build-configuration fault, not a missing file. "
+        f"Wheel contains: {sorted(members)}"
+    )
+
+
+def test_the_public_names_import_out_of_the_wheel_and_not_out_of_src(
+    extracted_wheel: Path,
+) -> None:
+    # The point of the subprocess is the assertion about __file__. Putting the
+    # extracted wheel first on sys.path is not by itself proof that the wheel is
+    # what answered: a developer running this has an editable opik_rigor on the
+    # same path, and a test that only checks `hasattr` would pass identically if
+    # the wheel were empty. So the child reports where it loaded from, and the
+    # parent refuses any answer that points outside the extraction directory.
+    code = (
+        "import json, pathlib, opik_rigor;"
+        "print(json.dumps({"
+        "'file': str(pathlib.Path(opik_rigor.__file__).resolve()),"
+        "'rubric': str(opik_rigor.example_rubric_path().resolve()),"
+        "'missing': [n for n in " + repr(list(NAMES_THE_PACKAGE_ROOT_MUST_EXPORT)) + " "
+        "if not hasattr(opik_rigor, n)],"
+        "'version': opik_rigor.__version__,"
+        "}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT.parent,
+        env={**_clean_env(), "PYTHONPATH": str(extracted_wheel)},
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    report = json.loads(result.stdout)
+    loaded_from = Path(report["file"])
+    rubric = Path(report["rubric"])
+
+    assert loaded_from.is_relative_to(extracted_wheel), (
+        f"opik_rigor was imported from {loaded_from}, which is not inside the "
+        f"extracted wheel at {extracted_wheel} -- the source tree answered instead, "
+        f"so this test proves nothing about the wheel"
+    )
+    assert rubric.is_relative_to(extracted_wheel), (
+        f"example_rubric_path() returned {rubric}, outside the extracted wheel"
+    )
+    assert rubric.is_file()
+    assert report["missing"] == []
+
+
+def _clean_env() -> dict[str, str]:
+    """The parent environment minus anything that would preload a second copy."""
+    import os
+
+    return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}

@@ -281,9 +281,15 @@ def test_the_names_a_judging_consumer_needs_are_public_at_the_package_root() -> 
 def test_the_package_ships_a_pep561_marker_so_its_annotations_reach_a_consumer() -> None:
     # Roadmap item 11. The library is annotated throughout, and under PEP 561 a
     # type checker must ignore every one of those annotations in an installed
-    # package that carries no py.typed. One empty file is the whole fix; the risk
-    # is that it exists in the tree and is dropped by the wheel build, which is
-    # why the build job is where this is checked a second time.
+    # package that carries no py.typed. One empty file is the whole fix.
+    #
+    # Under an editable install `opik_rigor.__file__` resolves into src/, so this
+    # asserts the marker is beside the package as imported and NOT that the wheel
+    # carries it -- which is the risk that actually matters, since the marker
+    # existing in the tree is precisely the state 0.1.0 shipped from while its
+    # wheel carried nothing. tests/test_packaging.py builds a wheel and reads the
+    # zip for that; this one stays because a non-editable install is the case it
+    # does cover.
     marker = Path(opik_rigor.__file__).resolve().parent / "py.typed"
 
     assert marker.is_file()
