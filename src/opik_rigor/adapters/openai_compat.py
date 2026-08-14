@@ -33,7 +33,9 @@ class OpenAICompatAdapter:
 
     Args:
         model_id: Exact model version, e.g. ``gpt-4o-2024-08-06``, or whatever
-            deployment name the compatible endpoint serves.
+            deployment name the compatible endpoint serves. The undated ids
+            (``gpt-4o``, ``gpt-4.1``, ``gpt-5``) are refused: OpenAI re-points
+            them at its newest snapshot. See :mod:`opik_rigor.pinning`.
         base_url: The endpoint root, e.g. an Azure AI Foundry deployment URL or a
             self-hosted vLLM server. Falls back to ``OPENAI_BASE_URL`` and then to
             the SDK's own default, so the same code runs against a gateway in CI

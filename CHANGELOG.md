@@ -7,8 +7,46 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet. The two items under *Not fixed, and why* below are queued for 0.2,
-which is where this project puts changes that alter what a recorded sample means.
+The two items under *Not fixed, and why* below are still queued for 0.2, which is
+where this project puts changes that alter what a recorded sample means.
+
+### Fixed
+
+- **`is_pinned` rejected every current frontier Anthropic model id**, and
+  `require_pinned` is on the path a new user hits in their first five minutes.
+  `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8` and every other current id
+  were refused, because the rule required a trailing date and Anthropic's ids no
+  longer carry one — while `claude-3-7-sonnet-20250219`, retired on 2026-02-19,
+  was accepted. The rule had been checking spelling in place of the property it
+  stood for. It now checks the property: an id is pinned when it contains no alias
+  token (`latest`, `newest`, `current`, `stable`, `default`) **and** ends in a
+  release designator — a release number (`claude-opus-4-8`), a date stamp
+  (`-20251001`, `-2024-08-06`), or an explicit version (`-v1`, `-2.1.0`). A last
+  component that is a *word* (`gpt-4o`, `mistral-large`, `…-instruct`) names a kind
+  of model rather than one release of it, and a kind is what providers re-point.
+  `_`, `@` and `:` now count as component separators, so Vertex
+  (`claude-opus-4-5@20251101`) and Bedrock (`…-20241022-v2:0`) snapshot spellings
+  are recognised too.
+- **`gpt-4.1` was accepted as pinned** and is an OpenAI alias that re-points to the
+  newest dated snapshot — its `4.1` satisfied the old dotted-version branch. Found
+  while checking the fix above in both directions. Providers that publish
+  `<family>-<number>` as a moving pointer are now listed in one documented table in
+  `pinning.py`, which also refuses `gpt-5` and `gpt-4`; `gpt-4o-2024-08-06` and
+  `gpt-4.1-2025-04-14` are unaffected.
+
+### Changed
+
+- **The `ModelPinError` message now names the clause that refused the id** and
+  quotes worked examples that are themselves pinned — a test asserts that, because
+  the previous message told the reader to add a date suffix, which for a current
+  Anthropic id names a model that does not exist.
+- `pinning.PINNED_EXAMPLES` is new: the examples the rejection message quotes,
+  exposed so a caller (and the test suite) can check the advice against the rule.
+
+Backwards compatibility: no signature changed and nothing was renamed. Every id
+0.1.1 accepted is still accepted **except `gpt-4.1`**, which it should not have
+accepted. Ids that were refused and are now accepted cannot break a caller, because
+the only thing `require_pinned` ever did with them was raise.
 
 ## [0.1.1] - 2026-08-13
 

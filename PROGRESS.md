@@ -289,7 +289,7 @@ Item 9 (no token usage on the `Adapter` seam) is likewise still open, for the sa
 reason: adding `complete_with_usage` to the protocol is additive for adapters but
 not for code that type-checks against `Adapter`.
 
-### 16. `is_pinned` rejects every current frontier Anthropic model id
+### 16. `is_pinned` rejects every current frontier Anthropic model id — **RESOLVED**
 
 Found on 2026-08-13, hours after 0.1.1 shipped, by an agent designing a *third*
 consumer — not by reading this repository. Verified against the published 0.1.1
@@ -319,16 +319,51 @@ implementation encodes a *proxy* for it — "has a date in the name" — and the
 has stopped tracking the thing it stood for. A vendor changed its naming
 convention and rigor's gate started measuring spelling instead of stability.
 
-The fix is not simply to widen the regex, and that is why this is not a one-liner:
-`claude-opus-5` genuinely *is* an alias that can be re-pointed, so accepting it
-would make `is_pinned` a lie in the other direction. The honest options are a
-per-provider rule set, an explicit allow-list the caller supplies, or separating
-"syntactically pinned" from "the caller asserts this is pinned" so the assertion is
-recorded in the evidence log rather than inferred from a string. Each changes what
-a recorded pin *means*, so this waits for **0.2** alongside items 8 and 9.
+The fix is not simply to widen the regex, and that is why this was not a one-liner:
+whether an id re-points is a provider *policy*, and `claude-opus-5` and `gpt-5` are
+the same shape with opposite answers, so no vendor-neutral rule can separate them.
 
-Until then, the workaround is to not call `require_pinned` on Anthropic ids, which
-is a bad workaround and is stated here so nobody rediscovers it at midnight.
+**Resolved.** The rule now checks immutability directly instead of checking for a
+date, in three clauses. (1) No alias token — `latest`, `newest`, `current`,
+`stable`, `default`; this half was always the load-bearing one and is unchanged.
+(2) The id must end in a *release designator*: splitting on `-`, `_`, `@`, `:`, the
+last component must be nothing but a version (`5`, `8`, `20251001`, `06`, `v1`,
+`2.1.0`). A last component that is a *word* — `sonnet`, `mini`, `4o`, `large`,
+`instruct` — names a kind of model, and a kind is exactly what a provider
+re-points at new weights. (3) One documented table, `_MOVING_FAMILIES`, for
+providers that publish `<family>-<number>` as a moving pointer; today that is
+OpenAI only, and it is the reason `gpt-5` and `gpt-4.1` are refused while
+`claude-opus-5` is accepted.
+
+The relaxation was checked in both directions, because a fix that makes everything
+pass is the removal of the check rather than a repair of it. Every current
+Anthropic id is accepted; `claude-3-5-sonnet-latest`, bare `gpt-4o`, `claude`,
+`my-finetune`, `mistral-large`, the empty string and non-strings are still refused;
+and `gpt-4.1`, which **0.1.1 wrongly accepted** as pinned (its `4.1` satisfied the
+old dotted-version branch), is now correctly refused. That last one was found by
+running the hand-derived verdict table against the shipped predicate and is a
+second, previously unrecorded defect in the same function.
+
+Two things the new rule deliberately does not do, both written into the module
+docstring so the next person meets them before a consumer does. It **accepts** a
+moving `<family>-<number>` pointer from a provider not yet in the table — the same
+class of failure as the defect it replaces, now costed at one line in a table
+rather than a rewrite. And it **refuses** a self-hosted id ending in a word even
+when its weights never move; the fix is a `-v1` suffix, and the asymmetry is
+chosen, because a false refusal is loud and a false acceptance silently
+invalidates every score recorded after it.
+
+Two things it does not *mean*, also stated in the docstring: pinned is not
+*available* (`claude-3-7-sonnet-20250219` is retired and still names one immutable
+version, which is what a score recorded against it in 2025 needs), and pinned is
+not *correct* (nothing here checks that a model exists).
+
+This is **additive under the compatibility rule**: no signature changed, no name
+was renamed, and no id that 0.1.1 accepted is now refused *except* `gpt-4.1`, which
+0.1.1 should not have accepted. Ids that were refused and are now accepted cannot
+break a caller, because the only thing `require_pinned` did with them was raise.
+The rejection *message* changed, which is the same kind of change 0.1.1 shipped
+additively as the *message* half of item 8.
 
 ## Phase 3 — closing the recorded gaps
 
@@ -456,9 +491,23 @@ step again, the fault is a name that *changed*, not one that is missing.
 **The pin rule lives in one module.** `pinning.py` is the single definition of
 "reproducible model id", imported by both the adapters and the judge. It was
 written before either of them precisely so the two could not drift apart on what
-the word means. An id must end in a concrete version marker (`-20250514`,
-`-2024-08-06`, `-v1`, `-2.1.0`) and must not contain `latest`, `newest`,
-`current`, `stable`, or `default`.
+the word means. An id must not contain `latest`, `newest`, `current`, `stable`, or
+`default`, and must end in a release designator — a release number
+(`claude-opus-4-8`), a date stamp (`-20250514`, `-2024-08-06`), or an explicit
+version (`-v1`, `-2.1.0`). It must also not be a member of one small, documented
+table of providers that publish `<family>-<number>` as a moving pointer.
+
+**The vendor-specific part of the pin rule is one table, on purpose.** Item 16
+below is what happens when a rule written against one vendor's naming convention
+outlives the convention. The replacement separates the half that is a property of
+naming in general — an alias has to be *named* `latest`, and a name ending in a
+word names a kind of model rather than a release of one — from the half that is
+irreducibly a provider policy, which no string can reveal. The second half is
+`_MOVING_FAMILIES` in `pinning.py`: one tuple, one provider today, with a comment
+saying it will need updating and a docstring section saying what the rule cannot
+catch. The point is that the next convention change costs a line in a table rather
+than a rewrite of the predicate — and that the gap is visible in advance rather
+than discovered by a consumer.
 
 **The evidence log has no delete API.** Not an oversight — `tests/test_evidence.py`
 asserts that no public name on `EvidenceLog` matches delete/remove/clear/truncate/

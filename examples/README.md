@@ -75,8 +75,8 @@ an aliased model id being refused:
 
 ```
   an alias is refused, at construction time:
-    judge 'aliased' refuses unpinned model id 'fake-judge-latest'. It must end in a concrete
-    version marker ...
+    judge 'aliased' refuses unpinned model id 'fake-judge-latest'. It contains the alias
+    token 'latest', which names whatever the provider is serving today ...
 ```
 
 Section 1 prints one source document and two summaries of it — one keeping every

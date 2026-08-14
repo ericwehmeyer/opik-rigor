@@ -85,10 +85,22 @@ enough to tell**.
 after a week of wasted compute:
 
 ```
-judge 'summariser' refuses unpinned model id 'claude-3-5-sonnet-latest'. It must
-end in a concrete version marker ... An alias re-points over time, which silently
-invalidates every score recorded against it.
+judge 'summariser' refuses unpinned model id 'claude-3-5-sonnet-latest'. It contains
+the alias token 'latest', which names whatever the provider is serving today rather
+than one fixed version. A pinned id names one immutable model version ... An alias
+re-points over time, which silently invalidates every score recorded against it.
 ```
+
+An id is pinned when it carries no alias token (`latest`, `newest`, `current`,
+`stable`, `default`) and ends in a release designator — a release number
+(`claude-opus-5`, `claude-opus-4-8`), a date stamp (`claude-haiku-4-5-20251001`,
+`gpt-4o-2024-08-06`), or an explicit version (`-v1`, `-2.1.0`). The property being
+checked is *immutability*, not spelling: a retired id that still names one fixed
+set of weights is pinned, and an id ending in a *word* (`gpt-4o`, `mistral-large`)
+is not, because a word names a kind of model and kinds get re-pointed. What no
+string can tell you is a provider's policy, so the one place that needs vendor
+knowledge — providers that publish `<family>-<number>` as a moving pointer — is a
+single documented table in `pinning.py`, and its limits are written down there.
 
 It hashes its rubric and raises when the rubric changes underneath a baseline
 (`accept_rubric_change=True` acknowledges it and records both hashes). And it
