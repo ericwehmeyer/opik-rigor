@@ -41,7 +41,10 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Lint
-        run: python -m ruff check src tests
+        # `scripts` is here because it was not, and scripts/verify_release.py is a
+        # 1700-line release gate that no linter had ever read. Anything shipped in
+        # this repository that CI is willing to run, CI should be willing to lint.
+        run: python -m ruff check src tests scripts
 
       - name: Test (offline, key-free)
         run: python -m pytest -m "not requires_network and not requires_opik" --cov --cov-report=xml
@@ -55,9 +58,89 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          # Matches the test job. This job now installs the package's own
+          # dependencies (scipy pulls numpy) for the isolated probe below, which is
+          # a real download to repeat on every push otherwise.
+          cache: pip
       - run: python -m pip install --upgrade pip build twine
+
+      # Built from a pristine checkout, before anything is installed into the tree,
+      # so the artifacts verified below are the artifacts a clean clone produces.
       - run: python -m build
       - run: python -m twine check dist/*
+
+      # `twine check` renders the README and stops. It opened neither zip. Every
+      # defect the first external consumer reported against the published 0.1.0
+      # wheel got past a green `twine check` on this exact step -- see the
+      # verification step below for what it would have said instead.
+      #
+      # Installed *after* the build so that no editable-install artefact can end up
+      # inside the sdist. Three things are needed and each maps to a named check:
+      #   - the package's own dependencies: opik_rigor.distribution imports
+      #     scipy.stats at module scope, so the isolated `-E -S` probe cannot import
+      #     the extracted wheel at all without them, and a probe that cannot import
+      #     is a FAIL, not a skip.
+      #   - the distribution itself: `version-matches-installed` reads
+      #     importlib.metadata in this interpreter and SKIPS when nothing is
+      #     installed. Editable rather than `dist/*.whl` on purpose -- an editable
+      #     install puts nothing named opik_rigor into site-packages, so the probe's
+      #     shadowing evidence stays empty and the isolation record is unambiguous.
+      #   - twine, already installed above, for the `twine-check` row.
+      - name: Install what the release checks need
+        run: python -m pip install -e .
+
+      # WHY THIS RUNS ON EVERY PUSH AND PR, NOT ONLY ON TAGS
+      #
+      # Every failure this catches is introduced by an ordinary commit -- a
+      # .gitignore rule, a `packages = [...]` stanza, a file moved out of the
+      # package root, a README that starts advertising a symbol -- and none of them
+      # is visible in the source tree. Deferring the check to the tag means learning
+      # about it at the one moment it cannot be fixed cheaply: a version number on
+      # PyPI can be yanked but never reused, as publish.yml's own header says. The
+      # commit that breaks the wheel should be the commit that goes red.
+      #
+      # WHY EXIT CODE 2 IS A FAILURE, AND WHY --allow-dev-version IS NOT PASSED
+      #
+      # The script exits 0 (all ran, all passed), 1 (something failed) or 2 (nothing
+      # failed but something could not run). A bare `run:` fails the step on any
+      # non-zero status, so 2 is fatal here by default and deliberately left that
+      # way. Its own design rule is that a skipped check is never a passing check;
+      # a gate that swallowed 2 would report green for a release nobody verified.
+      #
+      # That is affordable because this job controls the whole environment: build,
+      # twine and the distribution are all installed above, so every check's
+      # prerequisite is guaranteed and a clean tree exits 0 with zero skips. A 2
+      # here therefore means this workflow's own environment drifted and the gate
+      # quietly stopped checking -- which is precisely the event worth failing on.
+      #
+      # --allow-dev-version is not passed because under that policy it cannot help.
+      # It downgrades the version-not-dev FAIL to a SKIP, and a SKIP is exit 2, so
+      # it converts a red run with an exact diagnosis into a red run with a vaguer
+      # one. Measured on a 0.2.0.dev0 tree: without the flag, exit 1, "a development
+      # version would be published: ['0.2.0.dev0']"; with it, exit 2, "SKIPPED
+      # version-not-dev". The flag is for a human running this mid-build, not for a
+      # gate. If a .dev version ever lands on a branch, this job says so on the
+      # commit that did it -- which is the intended behaviour, not a side effect.
+      #
+      # WHY ONLY THIS ONE CELL, WHEN `test` RUNS EIGHT
+      #
+      # The wheel is py3-none-any: one pure-Python artifact, identical whichever of
+      # the eight cells builds it, so eight runs would produce eight identical
+      # verdicts and eight copies of the evidence. One is enough, and the one that
+      # counts is this job -- the only place a wheel is built, uploaded, and (in
+      # publish.yml, on the same runner and interpreter) eventually served. A cell
+      # that never produces a published artifact would be verifying a wheel nobody
+      # ships.
+      #
+      # --no-build so the subject is the artifact `python -m build` just produced
+      # and `upload-artifact` is about to publish, rather than a second wheel built
+      # a second time that no one would ever see.
+      - name: Verify the built artifact is the library it claims to be
+        run: python scripts/verify_release.py --no-build
+
+      # Last, so the dist artifact only ever exists for a build that passed
+      # verification. A downloadable `dist` is a statement that these bytes are
+      # publishable; it should not be produced for bytes that are not.
       - uses: actions/upload-artifact@v7
         with:
           name: dist
