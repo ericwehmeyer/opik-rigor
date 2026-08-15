@@ -846,6 +846,50 @@ a release cut for it would cost a version number for an input no one can type by
 accident. The fix when it comes is a clamp in the two-sided `z`, and it belongs
 with a test that sweeps the top of the range rather than sampling it.
 
+### 23. Three tests guard the Opik seam and CI deselects all three, because the marker describes itself wrongly
+
+Found 2026-08-15 while auditing the drift-canary coverage of both repos.
+
+`pyproject.toml:143` declares `requires_opik: test needs a reachable Opik
+instance`. CI therefore runs `pytest -m "not requires_network and not
+requires_opik"`, and the three tests carrying that marker never execute anywhere.
+
+**The description is wrong.** All three — `test_pytest_plugin.py:454`, `:491`,
+`:526` — call `pytest.importorskip("opik")` and then exercise *plugin
+co-installation through entry points*. Grepping their bodies for `localhost`,
+`127.0.0.1`, `url`, `Opik(`, `client` and `http` returns nothing. They need the
+`opik` **package importable**. They do not need a server, a container, a URL or a
+credential.
+
+What they protect is not small:
+
+- that both `pytest11` plugins load and collect together, run as a subprocess so
+  they are loaded the way a user's environment loads them rather than because
+  this process already imported them;
+- that Opik stays completely inert when nothing asks for it, so installing
+  `opik-rigor` changes nothing about an Opik user's suite, and vice versa;
+- that the plugin never imports `opik` — the rule keeping core free of a vendor
+  SDK, checked at the one place it is easiest to break, since an entry-point
+  plugin is imported in every pytest process on the machine.
+
+So the seam this project's `COMPATIBILITY.md` is *about* is guarded by three
+tests, and the guard has been switched off by a sentence. A test that never runs
+is not a test; it is a comment with a decorator. And the failure mode it guards is
+the silent kind — `trace()` ends in `**ignored_kwargs`, so an Opik keyword rename
+is swallowed rather than raised.
+
+The fix is two lines and no infrastructure: correct the marker's description to
+say what it means (`test needs the opik package installed`), and give CI a cell
+that installs `.[opik,dev]` and runs `-m requires_opik`. Not done here — this was
+found during a migration-kit release audit, and rigor 0.2.0 is already published —
+but it is the cheapest real coverage available to this project and it should go in
+before anything more ambitious.
+
+**Not verified: that the three tests pass.** `opik` is not installed in this
+tree's venv, so what is established above is what they *require*, read from their
+source, not that they are green. Installing `opik` and running them is step one of
+the fix.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.
