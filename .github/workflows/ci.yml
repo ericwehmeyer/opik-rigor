@@ -49,6 +49,48 @@ jobs:
       - name: Test (offline, key-free)
         run: python -m pytest -m "not requires_network and not requires_opik" --cov --cov-report=xml
 
+  # The three tests the matrix above deselects. They existed for two releases and
+  # ran nowhere, because the marker described itself as needing "a reachable Opik
+  # instance" and everyone believed it -- see PROGRESS.md item 23. They need the
+  # `opik` package importable and nothing else: no server, no URL, no credential.
+  #
+  # A separate job rather than an extra marker in the matrix, for cost. The `[opik]`
+  # extra pulls litellm, openai, tiktoken, pydantic and the rest of Opik's tree;
+  # adding that to eight cells would buy eight identical copies of a 3-test result.
+  # One cell is enough, because what these tests check -- two pytest11 entry points
+  # co-existing -- is pure-Python plugin wiring with no per-version or per-OS
+  # behaviour. The floor is used rather than the ceiling: if Opik ever raises its
+  # requires-python above ours, this job is where that shows up first.
+  opik-seam:
+    name: opik seam (co-installation)
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[opik,pytest,dev]"
+
+      # `pytest` exits 5 for "no tests collected", which is NOT success. If this
+      # marker ever stops selecting anything -- a rename, a moved file, a dropped
+      # decorator -- a bare `run:` would go green having verified nothing, which is
+      # the exact failure this job was created to end. Fail loudly instead.
+      - name: Test the Opik seam
+        run: |
+          set +e
+          python -m pytest -m requires_opik
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "::error::no test carried the requires_opik marker; this job verified nothing"
+            exit 1
+          fi
+          exit "$rc"
+
   build:
     name: build sdist + wheel
     runs-on: ubuntu-latest

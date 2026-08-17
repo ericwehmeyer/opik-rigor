@@ -140,7 +140,14 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
   "requires_network: test needs a live provider endpoint (deselected by default in CI)",
-  "requires_opik: test needs a reachable Opik instance",
+  # NOT "needs a reachable Opik instance" -- that is what this line said for two
+  # releases, and it is why ci.yml deselected all three tests carrying it and
+  # nothing anywhere ever ran them. They call `pytest.importorskip("opik")` and
+  # exercise plugin co-installation through entry points: they need the PACKAGE
+  # importable, not a server, a URL or a credential. Measured: 3 passed in 7.84s
+  # with `pip install -e ".[opik,pytest,dev]"` and no network service running.
+  # The `opik-seam` job in ci.yml now runs them. See PROGRESS.md item 23.
+  "requires_opik: test needs the `opik` package installed (not a running Opik server)",
 ]
 
 # Strict, because `py.typed` claims exactly that. The marker tells a downstream

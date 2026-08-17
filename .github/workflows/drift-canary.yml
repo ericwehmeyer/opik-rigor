@@ -1,0 +1,634 @@
+# Weekly dependency drift canary.
+#
+# CI (ci.yml) tests what this library is today: the offline, key-free suite, with
+# `-m "not requires_network and not requires_opik"`. That deselection leaves two
+# edges completely untested, and both of them are edges to somebody else's code:
+#
+#   EDGE 1  rigor -> Opik.  `opik = ["opik>=2.0,<3"]` is a declared extra, and the
+#           three `requires_opik` tests are the only thing anywhere that checks the
+#           two pytest11 plugins co-install. CI deselects them, so nothing in this
+#           repository has ever run them. COMPATIBILITY.md records the surface as
+#           verified against Opik 2.2.28; whatever is latest today is not that.
+#
+#   EDGE 2  rigor -> model-migration-kit.  rigor's only real consumer, and it pins
+#           `opik-rigor>=0.2,<0.3`. Nothing here installs it, so a 0.3 could ship
+#           with this repository entirely green and break the one package that
+#           depends on it. migkit's own canary watches this edge from its side --
+#           it tests LATEST rigor against pinned migkit. This job is the mirror:
+#           HEAD rigor against latest published migkit. Neither one subsumes the
+#           other, because they fail at different times: migkit's canary catches a
+#           rigor release after it is published, this one catches it before.
+#
+# The marker's own description is worth correcting where anyone will read it:
+# pyproject.toml calls requires_opik "test needs a reachable Opik instance". It does
+# not. All three call `pytest.importorskip("opik")` and exercise plugin
+# co-installation -- they need the PACKAGE, not a server, and they run in about
+# eighteen seconds. That description is the most likely reason nobody revisited the
+# deselection.
+#
+# THIS WORKFLOW'S PASS/FAIL MEANS "IS THE CANARY HEALTHY", NOT "IS THERE DRIFT".
+#   green + no issue  -> latest works, nothing to do
+#   green + an issue  -> DRIFT. Read the issue; it names the versions and the edge.
+#   red               -> the canary itself could not run (index down, yanked
+#                        release, network). Fix the job. Says nothing about
+#                        compatibility.
+# Drift never turns this red, so the red channel stays scarce and therefore readable.
+
+name: Drift canary
+
+on:
+  schedule:
+    # 07:43 UTC Monday. Off the hour on purpose: GitHub drops scheduled runs that
+    # queue up at :00, and a canary that silently stops running is the exact failure
+    # this job exists to prevent. Deliberately not migkit's "17 6 * * 1" -- the two
+    # canaries watch opposite ends of the same edge, and running them an hour and a
+    # half apart keeps one index blip from reddening both and reading as a real
+    # incompatibility on both sides at once.
+    - cron: "43 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel a canary mid-run: a cancelled run is classified as neither drift nor
+  # broken, which is worse than either answer.
+  group: drift-canary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: latest deps / py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    # A weekly job with no ceiling can hang on a stalled index and hold a runner for
+    # the six-hour default. On a weekly cadence that is indistinguishable from a
+    # canary that stopped firing, which is the failure the schedule comment above
+    # already calls out.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling, not the whole matrix. 3.10 is where a dependency
+        # raising its requires-python bites first; 3.13 is where a new C extension
+        # fails to build first. The middle versions add runtime, not coverage. These
+        # are this package's own bounds -- requires-python is >=3.10 and the highest
+        # declared classifier is 3.13.
+        python-version: ["3.10", "3.13"]
+    env:
+      # Same invariant as ci.yml: the suite is green with no provider credentials.
+      # It is also what makes a test failure unambiguous -- there is no network in
+      # the test path, so a failure cannot be a flake.
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # --- Stage 1: what IS the latest? -------------------------------------------
+      # Failure to reach the index for `opik` is always a broken canary: we never got
+      # far enough to learn anything about compatibility. A yanked release counts as
+      # broken too -- testing against a withdrawn version tells us nothing and would
+      # file a bogus issue.
+      #
+      # `model-migration-kit` is different, and the difference is load-bearing: it is
+      # not on PyPI yet. A 404 there is the expected state, not a failure, and must
+      # classify as SKIP -- never drift (there is nothing to be incompatible with)
+      # and never broken (nothing is wrong with this job). Getting that backwards
+      # would file a drift issue every Monday from the day this lands until the day
+      # migkit ships, which is how a canary teaches people to ignore it.
+      - name: Resolve latest versions
+        id: resolve
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys, time, urllib.error, urllib.request
+
+          def fetch(pkg, required):
+              url = f"https://pypi.org/pypi/{pkg}/json"
+              err = None
+              for attempt in range(3):
+                  try:
+                      with urllib.request.urlopen(url, timeout=30) as r:
+                          return json.load(r)
+                  except urllib.error.HTTPError as exc:
+                      if exc.code == 404 and not required:
+                          # Unregistered name. Expected for migkit until it ships.
+                          return None
+                      err = exc
+                  except Exception as exc:  # noqa: BLE001 - any failure is "index unreachable"
+                      err = exc
+                  # Back off between attempts. Three retries fired back-to-back all
+                  # complete inside a second and all lose to the same blip, which
+                  # makes the retry decorative -- and a five-second outage then
+                  # reddens the canary and reads as if the job needed fixing.
+                  if attempt < 2:
+                      time.sleep(5 * (attempt + 1))
+              if not required:
+                  return None
+              print(f"::error::Could not reach PyPI for {pkg}: {err}", file=sys.stderr)
+              raise SystemExit(1)
+
+          def latest(pkg, required):
+              data = fetch(pkg, required)
+              if data is None:
+                  return ""
+              version = data["info"]["version"]
+              files = data["releases"].get(version) or []
+              if files and all(f.get("yanked") for f in files):
+                  if not required:
+                      return ""
+                  print(f"::error::{pkg} {version} is yanked. Not a compatibility "
+                        f"signal -- the canary has nothing valid to test against.",
+                        file=sys.stderr)
+                  raise SystemExit(1)
+              return version
+
+          opik = latest("opik", required=True)
+          migkit = latest("model-migration-kit", required=False)
+
+          print(f"opik={opik}")
+          print(f"migkit={migkit}")
+          print("versions=" + json.dumps({"opik": opik, "model-migration-kit": migkit or "unpublished"}))
+          PY
+
+      # ================= EDGE 1: rigor -> Opik ====================================
+
+      # The one ambiguous stage, split by reading pip's own diagnosis rather than
+      # guessing. A resolver refusal is a real compatibility fact a user would hit --
+      # most concretely, latest Opik raising requires-python above our 3.10 floor, or
+      # moving outside the `opik>=2.0,<3` bound this package declares. A timeout is
+      # just a timeout.
+      - name: Edge 1 - install at latest Opik
+        id: opik_install
+        continue-on-error: true
+        env:
+          OPIK: ${{ steps.resolve.outputs.opik }}
+        run: |
+          set +e
+          python -m pip install --upgrade pip
+
+          # The pinned baseline, installed first so the upgrade below has something
+          # to upgrade. Its failure is a BROKEN canary, never drift: we never reached
+          # the question this job asks, and what it would have failed on is the bound
+          # ci.yml already tests.
+          python -m pip install -e ".[opik,pytest,dev]" 2>&1 | tee baseline.log
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            echo "outcome=broken" >> "$GITHUB_OUTPUT"
+            echo "detail=the pinned baseline install failed, so latest Opik was never tested" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          log=opik-install.log
+          for attempt in 1 2 3; do
+            echo "--- upgrade attempt $attempt ---"
+            python -m pip install --upgrade "opik==$OPIK" 2>&1 | tee "$log"
+            rc=${PIPESTATUS[0]}
+            [ "$rc" -eq 0 ] && break
+            grep -qiE "resolutionimpossible|no matching distribution|requires a different python" "$log" && break
+            sleep $(( attempt * 20 ))
+          done
+
+          if [ "$rc" -eq 0 ]; then
+            echo "outcome=ok" >> "$GITHUB_OUTPUT"
+          elif grep -qiE "resolutionimpossible|no matching distribution|requires a different python" "$log"; then
+            # A user running `pip install "opik-rigor[opik]"` would hit exactly this.
+            echo "outcome=drift" >> "$GITHUB_OUTPUT"
+            echo "detail=Opik install refused: $(grep -iEm1 'resolutionimpossible|no matching distribution|requires a different python' "$log")" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=broken" >> "$GITHUB_OUTPUT"
+            echo "detail=pip failed 3x with no resolver error (network/index)" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      # Guards against the quietest failure available: an install that no-ops, leaving
+      # the pinned version in place, so the suite passes and the canary reports green
+      # having tested nothing. The version assertion is the whole point of this step.
+      - name: Edge 1 - preflight
+        id: opik_preflight
+        if: steps.opik_install.outputs.outcome == 'ok'
+        continue-on-error: true
+        env:
+          # Read from the environment rather than interpolated into the source: the
+          # value is a string PyPI chose, and a quote or a backslash in it would be a
+          # SyntaxError in this heredoc rather than a version mismatch.
+          OPIK: ${{ steps.resolve.outputs.opik }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          import opik
+          want = os.environ["OPIK"]
+          got = getattr(opik, "__version__", "")
+          print(f"opik {got} (wanted {want})")
+          if got != want:
+              print(f"::error::upgrade did not take: still on {got or 'unknown'}")
+              sys.exit(1)
+          PY
+
+      # The tests ci.yml deselects. `--strict-markers` is already in addopts, so a
+      # marker typo is a collection error rather than a silent empty selection --
+      # but pytest exits 5 for "no tests collected", and that is NOT success. A
+      # marker that selects nothing while reading as a promise of coverage is a
+      # defect this project has already shipped once (migkit's `requires_network`,
+      # deselected in two workflows and carried by no test). Exit 5 is therefore
+      # classified as a BROKEN canary, loudly, rather than passing as green.
+      - name: Edge 1 - run the tests CI deselects
+        id: opik_suite
+        if: steps.opik_install.outputs.outcome == 'ok'
+        continue-on-error: true
+        run: |
+          set +e
+          python -m pytest -m requires_opik
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "::error::no test carried the requires_opik marker; this job verified nothing"
+            exit 90
+          fi
+          exit "$rc"
+
+      # ================= EDGE 2: rigor -> model-migration-kit =====================
+
+      # Deliberately a separate virtualenv rather than the one above. Edge 1 has just
+      # force-upgraded Opik past whatever the resolver would have chosen, and a dirty
+      # environment failing here would be indistinguishable from a genuine consumer
+      # break -- which is the single thing this edge exists to detect.
+      #
+      # Install order matters and is the whole trick: latest published migkit FIRST
+      # (which drags in whatever opik-rigor its bound resolves to), then `pip install
+      # -e .` so THIS checkout wins. What runs is tomorrow's rigor under today's
+      # consumer, which is exactly the break a rigor release would ship.
+      - name: Edge 2 - latest migkit against this checkout
+        id: migkit
+        if: steps.resolve.outputs.migkit != ''
+        continue-on-error: true
+        env:
+          MIGKIT: ${{ steps.resolve.outputs.migkit }}
+        run: |
+          set +e
+          python -m venv .venv-migkit
+          VPY=.venv-migkit/bin/python
+
+          "$VPY" -m pip install --upgrade pip
+          "$VPY" -m pip install "model-migration-kit==$MIGKIT" 2>&1 | tee migkit-install.log
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            if grep -qiE "resolutionimpossible|no matching distribution|requires a different python" migkit-install.log; then
+              echo "outcome=drift" >> "$GITHUB_OUTPUT"
+              echo "detail=migkit refused to install: $(grep -iEm1 'resolutionimpossible|no matching distribution|requires a different python' migkit-install.log)" >> "$GITHUB_OUTPUT"
+            else
+              echo "outcome=broken" >> "$GITHUB_OUTPUT"
+              echo "detail=could not install model-migration-kit (network/index)" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # This checkout, over the top. A resolver refusal here IS the finding: it
+          # means HEAD has moved outside the bound migkit declares.
+          "$VPY" -m pip install -e . 2>&1 | tee rigor-over.log
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            echo "outcome=drift" >> "$GITHUB_OUTPUT"
+            echo "detail=this checkout could not be installed over migkit $MIGKIT: $(grep -iEm1 'resolutionimpossible|no matching distribution|conflict' rigor-over.log)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Prove the substitution actually took before drawing any conclusion from
+          # the demo. Same failure mode Edge 1's preflight guards: a no-op install
+          # leaves the published rigor in place and the demo then tests nothing.
+          "$VPY" - <<'PY'
+          import pathlib, sys
+          import opik_rigor
+          here = pathlib.Path("src").resolve()
+          got = pathlib.Path(opik_rigor.__file__).resolve()
+          print(f"opik_rigor imported from {got}")
+          if here not in got.parents:
+              print("::error::the editable install did not take; opik_rigor still resolves to site-packages")
+              sys.exit(1)
+          PY
+          if [ $? -ne 0 ]; then
+            echo "outcome=broken" >> "$GITHUB_OUTPUT"
+            echo "detail=the editable install of this checkout did not take" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # migkit's demo is keyless, offline and deterministic, and NO-GO is its
+          # correct answer -- exit 1 is the demo working. Asserting the exact code
+          # rather than "non-zero" is deliberate: a crash also exits non-zero, and
+          # the two mean opposite things.
+          .venv-migkit/bin/migkit demo > demo.out 2> demo.err
+          rc=$?
+          tail -5 demo.err
+          if [ "$rc" -eq 1 ]; then
+            echo "outcome=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=drift" >> "$GITHUB_OUTPUT"
+            echo "detail=migkit $MIGKIT demo exited $rc against this checkout (expected 1 = NO-GO)" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      # ================= classify =================================================
+
+      - name: Classify
+        id: classify
+        if: always()
+        # Every untrusted value arrives as an environment variable and is read as
+        # `$VAR`, never expanded into the script by `${{ }}`. The DETAIL values are
+        # lines lifted out of pip's stderr -- text this repository does not author --
+        # and pasting that between the quotes of an `echo` makes an index's error
+        # message executable in a job that holds a token.
+        env:
+          OPIK_OUTCOME: ${{ steps.opik_install.outputs.outcome }}
+          OPIK_DETAIL: ${{ steps.opik_install.outputs.detail }}
+          OPIK_PREFLIGHT: ${{ steps.opik_preflight.outcome }}
+          OPIK_SUITE: ${{ steps.opik_suite.outcome }}
+          MIGKIT_OUTCOME: ${{ steps.migkit.outputs.outcome }}
+          MIGKIT_DETAIL: ${{ steps.migkit.outputs.detail }}
+          MIGKIT_VERSION: ${{ steps.resolve.outputs.migkit }}
+          OPIK: ${{ steps.resolve.outputs.opik }}
+          PYVER: ${{ matrix.python-version }}
+        run: |
+          {
+            echo "### Drift canary — py$PYVER"
+            echo
+            echo "- opik: \`${OPIK:-unresolved}\`"
+            echo "- model-migration-kit: \`${MIGKIT_VERSION:-not published yet}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # --- edge 1 ---
+          case "$OPIK_OUTCOME" in
+            broken) e1=broken; d1="$OPIK_DETAIL" ;;
+            drift)  e1=drift;  d1="$OPIK_DETAIL" ;;
+            ok)
+              if [ "$OPIK_PREFLIGHT" != "success" ]; then
+                e1=drift; d1="installed, but the Opik upgrade did not take or opik is unimportable"
+              elif [ "$OPIK_SUITE" != "success" ]; then
+                e1=drift; d1="the requires_opik tests failed against Opik $OPIK"
+              else
+                e1=clean; d1=""
+              fi ;;
+            *)
+              # Reached when the install step produced no outcome at all -- it was
+              # killed by a timeout or the runner, and `continue-on-error` swallowed
+              # that. Without this branch the status stayed empty, the fail step
+              # below never fired, and `report` read the empty string as "not drift"
+              # and closed the open issue. A silent green is the one result this
+              # workflow exists to make impossible.
+              e1=broken; d1="the Opik install step ended without classifying itself (outcome='$OPIK_OUTCOME')" ;;
+          esac
+
+          # --- edge 2 ---
+          if [ -z "$MIGKIT_VERSION" ]; then
+            # Not on PyPI yet. No evidence either way; never drift, never broken.
+            e2=skip; d2="model-migration-kit is not published yet"
+          else
+            case "$MIGKIT_OUTCOME" in
+              ok)     e2=clean;  d2="" ;;
+              drift)  e2=drift;  d2="$MIGKIT_DETAIL" ;;
+              broken) e2=broken; d2="$MIGKIT_DETAIL" ;;
+              *)      e2=broken; d2="the migkit step ended without classifying itself (outcome='$MIGKIT_OUTCOME')" ;;
+            esac
+          fi
+
+          # --- worst of the two, drift outranking broken outranking clean ---
+          if [ "$e1" = drift ] || [ "$e2" = drift ]; then
+            status=drift
+          elif [ "$e1" = broken ] || [ "$e2" = broken ]; then
+            status=broken
+          else
+            status=clean
+          fi
+
+          # Written as `if` blocks rather than `[ ... ] && assign`. GitHub runs every
+          # `run:` step under `bash -e`, where a bare `test && assign` whose test is
+          # false makes the whole list return 1 and kills the step -- before the two
+          # `printf`s below ever reach $GITHUB_OUTPUT. The status would then arrive
+          # empty and be filed as `broken`, so the healthy case would have been the
+          # one that reported a broken canary.
+          detail=""
+          if [ "$e1" != clean ]; then
+            detail="opik: $d1"
+          fi
+          if [ "$e2" != clean ] && [ "$e2" != skip ]; then
+            if [ -n "$detail" ]; then
+              detail="$detail; "
+            fi
+            detail="${detail}migkit: $d2"
+          fi
+
+          {
+            echo
+            echo "- edge rigor->Opik: **$e1** ${d1}"
+            echo "- edge rigor->migkit: **$e2** ${d2}"
+            echo "- cell verdict: **$status**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          printf 'detail=%s\n' "$detail" >> "$GITHUB_OUTPUT"
+
+      # Filed before the fail step below, so a broken cell still reports itself.
+      - name: File this cell's verdict
+        if: always()
+        env:
+          PYVER: ${{ matrix.python-version }}
+          STATUS: ${{ steps.classify.outputs.status }}
+          DETAIL: ${{ steps.classify.outputs.detail }}
+          VERSIONS: ${{ steps.resolve.outputs.versions }}
+        run: |
+          mkdir -p verdicts
+          python3 - <<'PY'
+          import json, os, pathlib
+          status = os.environ.get("STATUS") or "broken"
+          verdict = {
+              "python": os.environ["PYVER"],
+              # An absent status means Classify never ran -- the job died before it.
+              # Unknown is not clean, and must never be able to close a drift issue.
+              "status": status,
+              "detail": os.environ.get("DETAIL") or "",
+              "versions": os.environ.get("VERSIONS") or "",
+          }
+          path = pathlib.Path("verdicts") / f"py{verdict['python']}.json"
+          path.write_text(json.dumps(verdict), encoding="utf-8")
+          print(path.read_text(encoding="utf-8"))
+          PY
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: canary-verdict-py${{ matrix.python-version }}
+          path: verdicts/
+          retention-days: 14
+
+      # The ONLY path that reddens this workflow. Drift cannot reach it.
+      - name: Fail the run only if the canary itself is broken
+        if: always() && steps.classify.outputs.status == 'broken'
+        env:
+          DETAIL: ${{ steps.classify.outputs.detail }}
+        run: |
+          echo "::error::Canary broken: $DETAIL"
+          echo "::error::This says nothing about compatibility. Fix the job, then re-run."
+          exit 1
+
+  report:
+    name: report drift
+    runs-on: ubuntu-latest
+    needs: canary
+    timeout-minutes: 10
+    # Runs even when a matrix cell failed, so a broken 3.10 cell cannot suppress a
+    # drift report from the 3.13 cell.
+    if: always() && needs.canary.result != 'cancelled'
+    permissions:
+      # `issues: write` is what `gh issue list/create/comment/edit/close` needs and
+      # is the whole reason this job is separate; `contents: read` is the floor.
+      # Nothing here checks out or writes code. Downloading this run's own artifacts
+      # goes through the Actions runtime token, not GITHUB_TOKEN, so it needs no
+      # `actions:` scope -- do not add one.
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LABEL: drift-canary
+      MARKER: "<!-- canary-key: rigor-downstream-edges -->"
+      # STATUS/DETAIL/VERSIONS are set on the reconcile step, not here: job-level
+      # `env` is evaluated before any step runs and cannot see the `steps` context.
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Collect every cell's verdict
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: canary-verdict-*
+          merge-multiple: true
+          path: verdicts
+
+      - name: Reduce the cells to one verdict
+        id: verdicts
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json
+
+          cells = [json.load(open(f, encoding="utf-8"))
+                   for f in sorted(glob.glob("verdicts/*.json"))]
+
+          if not cells:
+              # No cell got far enough to file anything. The canary job is already red
+              # and says so; `unknown` is deliberately neither `drift` (do not open an
+              # issue on no evidence) nor `clean` (do not close one, either).
+              print("status=unknown")
+              print("detail=no cell filed a verdict")
+              print("versions=")
+              raise SystemExit(0)
+
+          drift = [c for c in cells if c["status"] == "drift"]
+          broken = [c for c in cells if c["status"] not in ("drift", "clean")]
+          versions = next((c["versions"] for c in cells if c["versions"]), "")
+
+          def name(cells):
+              return "; ".join(
+                  f"py{c['python']}: {c['detail'] or 'no detail recorded'}" for c in cells)
+
+          if drift:
+              # Drift outranks clean and outranks broken. `clean` -- the only status
+              # that closes the issue -- requires every cell to have said so.
+              status, detail = "drift", name(drift)
+              if broken:
+                  detail += f" (and {', '.join('py' + c['python'] for c in broken)} could not be tested)"
+          elif broken:
+              status, detail = "broken", name(broken)
+          else:
+              status, detail = "clean", ""
+
+          # One line, bounded. A step output is newline-delimited, so a detail string
+          # carrying a newline out of pip's stderr would forge the outputs after it.
+          print(f"status={status}")
+          print("detail=" + " ".join(detail.split())[:400])
+          print(f"versions={versions}")
+          PY
+
+      # Reconcile a single issue rather than filing one per run. Identity comes from
+      # the label plus the marker in the body, never from the title, so retitling by
+      # hand does not orphan the issue and cause a duplicate.
+      - name: Reconcile the drift issue
+        env:
+          STATUS: ${{ steps.verdicts.outputs.status }}
+          DETAIL: ${{ steps.verdicts.outputs.detail }}
+          VERSIONS: ${{ steps.verdicts.outputs.versions }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+
+          # `gh issue create --label` fails outright on a label the repo does not have
+          # ("could not add label: 'drift-canary' not found"), and nothing has ever
+          # created this one. So the first genuine drift report would have died here,
+          # on the single run where it mattered, and the red would have read as a
+          # broken canary rather than as the drift it was. Idempotent, and cheap
+          # enough to just do every run.
+          gh label create "$LABEL" --repo "$REPO" --force \
+            --color FBCA04 \
+            --description "Filed by .github/workflows/drift-canary.yml" >/dev/null 2>&1 || true
+
+          existing=$(gh issue list --repo "$REPO" \
+            --label "$LABEL" --state open --json number,body --jq '.[0] // empty')
+          number=$(printf '%s' "$existing" | jq -r '.number // empty')
+          oldbody=$(printf '%s' "$existing" | jq -r '.body // empty')
+
+          if [ "$STATUS" != "drift" ]; then
+            # Clean (or the canary was broken, which is reported by the red run, not
+            # here). Close any open drift issue -- self-healing beats a stale yellow light.
+            if [ -n "$number" ] && [ "$STATUS" = "clean" ]; then
+              gh issue comment "$number" --repo "$REPO" \
+                --body "Resolved. Both downstream edges are green against $VERSIONS as of $today. [Run]($RUN_URL)"
+              gh issue close "$number" --repo "$REPO"
+            fi
+            exit 0
+          fi
+
+          body=$(cat <<EOF
+          $MARKER
+
+          The weekly canary exercised this library's two downstream edges -- the Opik
+          extra that \`ci.yml\` deselects, and \`model-migration-kit\` running against
+          **this checkout** -- and something did not pass.
+
+          | | |
+          |---|---|
+          | Versions tested | \`$VERSIONS\` |
+          | What happened | $DETAIL |
+          | Last checked | **$today** |
+          | Run | [$RUN_URL]($RUN_URL) |
+
+          This is a yellow signal. \`main\` is green and users on the pinned bounds are
+          fine; the CI badge is untouched.
+
+          What it means depends on the edge. An **Opik** failure means the \`[opik]\`
+          extra's bound no longer holds and \`COMPATIBILITY.md\` is out of date. A
+          **migkit** failure means a release cut from this checkout would break the
+          only package that depends on this one -- fix it here, before publishing,
+          rather than leaving migkit to discover it from the index.
+
+          Next: reproduce locally with the versions above, then either fix the
+          incompatibility or record why the bound stays where it is in
+          \`COMPATIBILITY.md\`.
+
+          This issue is maintained by \`.github/workflows/drift-canary.yml\`. It is
+          edited in place each week (no comment, no notification) and closes itself when
+          the canary goes green. A stale \`Last checked\` date means the schedule stopped
+          firing -- GitHub disables cron workflows after 60 days of repo inactivity.
+          EOF
+          )
+
+          if [ -z "$number" ]; then
+            gh issue create --repo "$REPO" \
+              --title "Drift: a downstream edge fails against latest" \
+              --label "$LABEL" --body "$body"
+            exit 0
+          fi
+
+          # Comment ONLY when the version set changed. A new version that still breaks
+          # is new information and deserves a notification; the same version breaking
+          # for the 40th week is not, and 52 "still broken" comments bury the one
+          # comment that mattered.
+          if ! printf '%s' "$oldbody" | grep -qF "$VERSIONS"; then
+            gh issue comment "$number" --repo "$REPO" \
+              --body "Still failing, against new versions: \`$VERSIONS\` — $DETAIL. [Run]($RUN_URL)"
+          fi
+          gh issue edit "$number" --repo "$REPO" --body "$body"
