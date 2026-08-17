@@ -885,10 +885,27 @@ found during a migration-kit release audit, and rigor 0.2.0 is already published
 but it is the cheapest real coverage available to this project and it should go in
 before anything more ambitious.
 
-**Not verified: that the three tests pass.** `opik` is not installed in this
-tree's venv, so what is established above is what they *require*, read from their
-source, not that they are green. Installing `opik` and running them is step one of
-the fix.
+**Verified 2026-08-17: they pass.** Installing `opik-rigor[opik,pytest,dev]`
+(pulling Opik 2.2.30) and running with both provider keys blanked:
+
+```
+python -m pytest -m requires_opik
+3 passed, 1039 deselected in 17.92s
+```
+
+**Eighteen seconds, no server, no credential.** That removes the last argument for
+leaving them out: this is not a slow or fragile suite that CI is right to skip, it
+is eighteen seconds of the only coverage this project has of the seam its
+`COMPATIBILITY.md` documents. There is a reasonable case they belong in CI
+directly rather than in a canary at all.
+
+**And they surfaced drift on the first run.** The Opik resolved by that install is
+**2.2.30**; `COMPATIBILITY.md` records the surface as verified against **2.2.28**.
+The record is two patch releases stale, which is exactly what a canary exists to
+tell you — and it was discovered by hand because no canary exists to say it. Note
+this is drift in the *record*, not a detected breakage: the three tests pass
+against 2.2.30. Re-verifying the compatibility table against 2.2.30 is the
+follow-on, and it is the kind of check this project already does well.
 
 ## Phase 3 — closing the recorded gaps
 
