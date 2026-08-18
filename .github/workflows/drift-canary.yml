@@ -8,7 +8,9 @@
 #           three `requires_opik` tests are the only thing anywhere that checks the
 #           two pytest11 plugins co-install. CI deselects them, so nothing in this
 #           repository has ever run them. COMPATIBILITY.md records the surface as
-#           verified against Opik 2.2.28; whatever is latest today is not that.
+#           verified against Opik 2.2.31, re-checked by hand on 2026-08-18 -- but
+#           by hand is exactly the problem: whatever is latest on the week this
+#           job runs is not necessarily what that file was checked against.
 #
 #   EDGE 2  rigor -> model-migration-kit.  rigor's only real consumer, and it pins
 #           `opik-rigor>=0.2,<0.3`. Nothing here installs it, so a 0.3 could ship

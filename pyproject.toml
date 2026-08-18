@@ -37,7 +37,8 @@ classifiers = [
 dependencies = ["numpy>=1.21", "scipy>=1.10"]
 
 [project.optional-dependencies]
-# Bounds justified in COMPATIBILITY.md: the surface was verified against 2.2.28,
+# Bounds justified in COMPATIBILITY.md: the surface was verified against 2.2.28
+# and re-verified unchanged through 2.2.31 on 2026-08-18,
 # and a major bump is exactly where trace()'s keyword names would move -- which
 # fails silently, because trace() ends in **ignored_kwargs.
 opik = ["opik>=2.0,<3"]

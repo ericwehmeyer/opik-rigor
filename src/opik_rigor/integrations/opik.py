@@ -32,7 +32,8 @@ real if it is dropped:
 
 No object from Opik is ever introspected (``inspect.signature``,
 ``typing.get_type_hints``): ``inspect.signature(Trace.span)`` raises on Python
-3.14 in opik 2.2.28. See COMPATIBILITY.md. Calling the methods is fine.
+3.14 in opik 2.2.28, and still does in 2.2.31. See COMPATIBILITY.md. Calling the
+methods is fine.
 """
 
 from __future__ import annotations

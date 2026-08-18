@@ -907,6 +907,35 @@ this is drift in the *record*, not a detected breakage: the three tests pass
 against 2.2.30. Re-verifying the compatibility table against 2.2.30 is the
 follow-on, and it is the kind of check this project already does well.
 
+**Closed 2026-08-18. The record now leads the latest release rather than trailing
+it.** The re-verification found 2.2.30 was itself no longer the top of the range —
+**2.2.31** had shipped — so it ran against both, in a venv built from nothing:
+
+```
+python -m venv v; pip install opik==2.2.30   -> introspect
+                  pip install opik==2.2.31   -> introspect
+```
+
+Every line of the table matches on both: `Opik.__init__`, `client.trace` (all
+fourteen keywords, still ending in `**ignored_kwargs`), `log_traces_feedback_scores`
+taking `List[BatchFeedbackScoreDict]` with `id` **required**, `FeedbackScoreDict`
+with `id` **not** required, `ErrorInfoDict`, the `SpanType` literal, and the
+`pytest11` entry point named `opik`. `inspect.signature(Trace.span)` still raises
+the identical `AttributeError` — three patch releases have not touched it, so item
+3 stays open upstream.
+
+Then the same venv got this checkout installed into it and ran the seam:
+`3 passed, 1039 deselected in 20.03s`. Introspection says the names did not move;
+that says the code path still works.
+
+Two records were stale, not one. The other was in `COMPATIBILITY.md`'s consumer
+section, which still said migration-kit pinned `opik-rigor>=0.1.1,<0.2` and
+validated `confidence` on `(0, 1)`. Both moved on 2026-08-14: the pin is
+`>=0.2,<0.3` and the floor is `0.5 < c < 1`, identical to this module's. Worth
+noting how it was found — not by the canary, which does not read that file, but by
+re-reading the paragraph next to the one being edited. The canary watches versions
+resolve; it cannot watch a sentence go out of date.
+
 ## Phase 3 — closing the recorded gaps
 
 Items 10, 11, 12, 13, 14 and 15 are closed, plus the *message* half of item 8.

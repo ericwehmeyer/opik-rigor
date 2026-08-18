@@ -7,15 +7,17 @@ Opik changes it.
 
 | | |
 |---|---|
-| `opik` | **2.2.28** |
-| Verified on | 2026-08-13 |
+| `opik` | **2.2.31** (the latest release on 2026-08-18) |
+| Re-verified on | 2026-08-18 — surface unchanged since 2.2.28 |
+| First verified against | 2.2.28, on 2026-08-13 |
 | Python used to verify | 3.14.4 (Windows) |
 | Opik's own `Requires-Python` | `>=3.10` |
-| Method | Installed the package into a clean venv and introspected the live objects with `inspect.signature`; cross-checked against the published docs |
+| Method | Installed the package into a clean venv and introspected the live objects with `inspect.signature`. The 2.2.28 pass also cross-checked the published docs; the 2026-08-18 re-check skipped the docs, since it confirmed an already-recorded surface rather than establishing a new one, and ran the introspection twice — against 2.2.30 and then 2.2.31 — both matching what is recorded below. |
+| Not only signatures | This checkout was then installed into that same venv and the three `requires_opik` tests run against 2.2.31: `3 passed, 1039 deselected in 20.03s`, no server. The re-check covers the live code path, not just the parameter names. |
 
 The surface below was read off the installed package, not copied from a tutorial.
 Where the rendered documentation disagreed with the installed code, the installed
-code won — see [Corrections](#corrections-to-the-published-docs).
+code won — see [A correction to this file](#a-correction-to-this-file-not-to-the-docs).
 
 ## The API rigor actually calls
 
@@ -56,6 +58,24 @@ client.flush(timeout=None) -> bool
 | `id` | no | `str` |
 | `reason` | no | `str \| None` |
 | `category_name` | no | `str \| None` |
+
+`log_traces_feedback_scores` does **not** take that type. It takes
+`list[BatchFeedbackScoreDict]` — a different `TypedDict`, on which `id` is
+**required** and names the trace the score attaches to:
+
+| key | required | type |
+|---|---|---|
+| `name` | **yes** | `str` |
+| `value` | **yes** | `float` |
+| `id` | **yes** | `str` — the trace id |
+| `reason` | no | `str \| None` |
+| `category_name` | no | `str \| None` |
+| `project_name` | no | `str \| None` |
+
+The distinction matters because of finding 2b below: a score missing `id` is not
+rejected, it is dropped. `log_assertion_to_opik` sets `"id": trace_id` on every
+score it builds, which is why `trace_id` is a required keyword argument of that
+function and is validated before anything is sent.
 
 `type` on a span is `Literal["general", "tool", "llm", "guardrail"]`.
 
@@ -166,8 +186,11 @@ introspects Opik's objects, so it is unaffected, but the integration tests do no
 rely on signature introspection either, and that is deliberate rather than
 accidental.
 
-This is an upstream bug in opik 2.2.28. Reported here so that a future reader who
-hits it knows it is not rigor's doing.
+This is an upstream bug, and it is still unfixed: reproduced unchanged on 2.2.30
+and again on 2.2.31 under Python 3.14.4 on 2026-08-18, with the identical
+`AttributeError`. Three patch releases have not touched it, so do not assume a
+newer 2.2.x has. Reported here so that a future reader who hits it knows it is not
+rigor's doing.
 
 ## A correction to this file, not to the docs
 
@@ -241,14 +264,25 @@ published wheel rather than this tree — the same method as the table at the to
 this file, pointed at rigor. Do not mirror it here; a second copy written from the
 source tree would describe something no user installs.
 
-**A pinned consumer does not get 0.2.0.** That file is verified against 0.1.1 and
-declares `opik-rigor>=0.1.1,<0.2`, which does not admit 0.2.0 at all — the pin
-holds until somebody moves it on purpose, in that repository, having read this.
-What it is holding back, concretely: migration-kit validates its
-`Thresholds.confidence` on the open interval `(0, 1)`
-(`src/model_migration_kit/judging.py:121`) and hands it straight to
-`assert_pass_rate` (`src/model_migration_kit/comparison.py:1243`), so a config
-file saying `confidence = 0.3` is accepted there and raises here.
+**The pin moved, on purpose, and the narrowing was adopted rather than absorbed.**
+This paragraph used to say that migration-kit declared `opik-rigor>=0.1.1,<0.2`,
+which does not admit 0.2.0 at all, and that a config file there saying
+`confidence = 0.3` would be accepted by its own validation and then raise here.
+Both halves are now out of date, in the way that was wanted. That repository
+declares `opik-rigor>=0.2,<0.3` (`pyproject.toml:47`), its `COMPATIBILITY.md` is
+verified against the installed 0.2.0 wheel, and `Thresholds.confidence` is now
+validated on `0.5 < c < 1` (`src/model_migration_kit/judging.py:143`) with the
+reason for the floor carried in the error message. The accepted set is identical
+on both sides: neither admits 0.5, neither admits 1.0. So `confidence = 0.3` is
+refused while the operator is still looking at the config they just edited,
+instead of raising from `assert_pass_rate` after the completions have been paid
+for.
+
+One input still crosses that agreement: `math.nextafter(1.0, 0.0)` is inside
+`(0.5, 1)`, so both validators admit it, and `assert_pass_rate` then raises
+`StatisticsError` from the two-sided interval — PROGRESS.md item 22. Config
+validation upstream does not screen it out and was never meant to; the band is one
+float wide and the fix belongs in the two-sided `z`.
 
 ## What to do when this drifts
 
