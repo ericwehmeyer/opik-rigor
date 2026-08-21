@@ -1295,3 +1295,131 @@ docstring and pinned by a test that would fail under the other z.
 - ~~CI has never actually run — the workflow is written but there is no remote yet.~~
   Resolved: pushed to `github.com/ericwehmeyer/opik-rigor`, and the matrix went
   green on the first run across py3.10–3.13 on Ubuntu and Windows.
+
+## Found on 2026-08-21, recorded rather than fixed
+
+Found while publishing model-migration-kit 0.1.0 and 0.1.1 and auditing the two
+gates against each other. Nothing below is fixed. Recorded because the reasoning
+is the perishable part, and because the first item is the only one that can make
+this library give a wrong answer.
+
+### `assert_no_regression`'s verdict depends on a SciPy heuristic it does not record
+
+`distribution.py` calls
+`_mannwhitneyu()(current_scores, baseline_scores, alternative="less")` with no
+`method=`, so SciPy's default `method="auto"` decides — exact for small untied
+samples, asymptotic otherwise. The two disagree, and the disagreement crosses the
+alpha boundary. Reproduced on scipy 1.18.0, `current=[1,2,3]`,
+`baseline=[4,5,6]`, alpha 0.05:
+
+```
+auto        U=0.0  p=0.050000  -> passes (p < alpha is strict)
+exact       U=0.0  p=0.050000  -> passes
+asymptotic  U=0.0  p=0.040428  -> RegressionError
+```
+
+Identical data, opposite verdicts. The report dict records `"test":
+"mann-whitney-u"` and `"alternative": "less"` but neither the method actually used
+nor the SciPy version — while `assert_pass_rate` does record
+`method='wilson-one-sided'`. So a verdict cannot be reproduced from its own
+evidence: a SciPy upgrade that moves the auto heuristic, or a tie appearing in the
+data, changes the answer with nothing in the log to show it.
+
+The fix is to pin the method explicitly, record it and the SciPy version in the
+report, and pin the choice with a test. Which method to pin is a real decision and
+not obvious — exact is right for small untied samples, asymptotic handles ties —
+so it needs deciding rather than defaulting. Deferred because 0.2.0 has no users
+yet; it should be fixed before it has one.
+
+### The drift canary has never run
+
+`gh api .../workflows/336292388/runs` returns `total_count: 0`. The workflow was
+registered 2026-08-17 at 14:56 UTC, after that Monday's 07:43 slot, so its first
+scheduled fire is 2026-08-24. Its `drift-canary` label does not exist on the repo
+yet either. Every finding below is therefore code that has never executed once.
+
+### …and Edge 2 cannot detect the thing it exists to detect
+
+The step installs this checkout over a pinned migkit and treats a resolver refusal
+as the finding. There is no resolver refusal: pip installs a distribution that
+violates an already-installed package's requirement, prints
+`ERROR: pip's dependency resolver does not currently take into account all the
+packages that are installed`, and **exits 0**. Verified twice — against a
+synthetic pair, and against the real packages by forcing `opik-rigor==0.1.1`
+under a published migkit that requires `>=0.2`.
+
+So the scenario the edge is written for — bumping this package past the bound
+migkit declares — yields `outcome=ok`, verdict `clean`, and the report job
+*closes* any open drift issue. Silent green on the one question the job asks. The
+grep on the following line already contains the word `conflict` but is only
+consulted inside the `if` that requires pip to have failed, so it is dead code.
+
+`pip check` exits 1 on exactly this conflict and is the one-line fix.
+
+### The canary reads any PyPI failure for migkit as "not published yet"
+
+migkit is fetched with `required=False`, and every failure path — a 500, a DNS
+blip, a TLS error, a timeout — returns `None`, which becomes `migkit=""`, which
+skips Edge 2, which classifies `clean`, which closes the drift issue. That
+leniency was correct while migkit genuinely 404'd. As of 2026-08-21 migkit is
+published, `""` is never a truthful answer, and the false-green path is live.
+
+### A vanished matrix leg reads as clean, in both repos
+
+The reduce step guards zero verdict cells but not one-of-two. If a matrix leg's
+runner dies before it files its verdict, the surviving cell's `clean` becomes the
+whole verdict and the drift issue is closed. `if: always()` cannot save a dead
+runner. Passing the expected leg count in and downgrading to `unknown` on a
+mismatch is enough; `unknown` already neither opens nor closes.
+
+### `check_entry_points` prints the mismatch and passes
+
+The loop computes the wheel's entry-point target, renders it into the evidence
+line, and fails only when it is `None` — it is never compared against
+`pyproject.toml`. Reproduced on a synthetic wheel whose evidence line read
+`pyproject … 'opik_rigor.plugin'; wheel says 'opik_rigor.WRONG_MODULE'`, status
+PASS. The gate fails open on the check that exists to catch exactly that.
+
+### Ten of seventeen checks are never invoked by any test
+
+Including `check_twine` and `main()`, which owns the exit 0/1/2 contract both
+workflows depend on. The twine row's own tests call `plain_lines` and reimplement
+the assertion rather than calling the check — which is how a second defect in that
+function (twine's `PASSED with warnings` spelling, see migration-kit's
+PROGRESS.md) survived a morning spent fixing the first.
+
+### Three documentation defects
+
+- `COMPATIBILITY.md:42` documents `trace.span(..., feedback_scores=None, ...)`.
+  That parameter has never existed on `Trace.span` in any Opik version —
+  confirmed against the 2.2.28, 2.2.31 and 2.2.36 wheels. It belongs to
+  `Opik.span` and `Opik.trace`, which are different methods. A reader who follows
+  it gets `TypeError: span() got an unexpected keyword argument`, and it silently
+  contradicts the correct advice two sections later.
+- `COMPATIBILITY.md`'s finding 3 says the method's *parameter list* shadows the
+  module name `span`. There is no such parameter. The shadowing is by the method
+  name itself: `def span` binds `span` in the class body, so the lazily-evaluated
+  `-> span.Span` resolves against the function object. The finding's own pasted
+  error says so — `'function' object has no attribute 'Span'`.
+- `drift-canary.yml:25` states that `pyproject.toml` calls `requires_opik` "test
+  needs a reachable Opik instance". The same commit that added the canary fixed
+  that description. The sentence was never true on any commit in history.
+
+### The recorded Opik version is five releases stale, and that is fine
+
+`COMPATIBILITY.md` records 2.2.31; latest is 2.2.36. The surface was diffed across
+2.2.28, 2.2.31 and 2.2.36 and every claim in the table is byte-identical, so the
+document is stale in its version number and not false in its substance. The claim
+is also date-scoped, which is honest. This is precisely the gap the canary exists
+to close, and it will close it on its first run — if that run works.
+
+### One branch shelved unmerged
+
+`worktree-agent-a5ab16a6055f9fb04` (`2609f8e`) adds a `readme-invocations` check:
+the README quickstart ends on `python -m opik_rigor.examples.summarise_eval
+--seed 7 --n 40`, presented as running offline with no credentials, and nothing
+in the gate ever ran a documented command — `readme-paths` proves only that the
+file is a member of the zip, and it discards the arguments. Its negative control
+is worth keeping: a wheel identical to the real one except the example's `--n`
+literal reads `--count` leaves `readme-paths` passing and fails only the new row,
+carrying argparse's own `error: unrecognized arguments: --n 40`.
